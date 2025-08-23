@@ -11,3 +11,6 @@ out/
 # 忽略日志和临时文件
 *.log
 *.tmp
+
+# 忽略 VS Code 扩展打包文件
+*.vsix
