@@ -21,3 +21,6 @@ logs/
 # OS generated files
 .DS_Store
 Thumbs.db
+
+# 忽略 VS Code 扩展打包文件
+*.vsix
