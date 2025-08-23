@@ -1,0 +1,74 @@
+{
+  "name": "starsfall-servers-manager",
+  "displayName": "Starsfall Servers Manager",
+  "description": "A VS Code extension to manage multiple Linux servers.",
+  "version": "0.0.1",
+  "engines": {
+    "vscode": "^1.75.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "starsfall.connectServer",
+        "title": "Starsfall: Connect Linux Server"
+      },
+      {
+        "command": "starsfall.editServer",
+        "title": "Starsfall: Edit Linux Server"
+      },
+      {
+        "command": "starsfall.removeServer",
+        "title": "Starsfall: Remove Linux Server"
+      },
+      {
+        "command": "starsfall.disconnectAll",
+        "title": "Starsfall: Disconnect All"
+      },
+      {
+        "command": "starsfall.focusServersExplorer",
+        "title": "Starsfall: Focus Servers Explorer"
+      }
+    ],
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "serversExplorer",
+          "title": "Servers Explorer",
+          "icon": "resources/icons/server.svg"
+        }
+      ]
+    },
+    "views": {
+      "serversExplorer": [
+        {
+          "id": "serversList",
+          "name": "Servers",
+          "icon": "resources/icons/server.svg"
+        }
+      ]
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run build",
+    "build": "webpack",
+    "watch": "webpack --watch",
+    "test": "node ./out/test/runTest.js"
+  },
+  "devDependencies": {
+    "@types/node": "^16.18.126",
+    "@types/ssh2": "^1.15.5",
+    "@types/vscode": "^1.75.0",
+    "node-loader": "^2.1.0",
+    "ts-loader": "^9.4.2",
+    "typescript": "^4.9.4",
+    "webpack": "^5.75.0",
+    "webpack-cli": "^5.0.1"
+  },
+  "dependencies": {
+    "ssh2": "^1.17.0"
+  }
+}

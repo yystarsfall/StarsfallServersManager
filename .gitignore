@@ -1,0 +1,23 @@
+# Dependency directories
+node_modules/
+
+# Build artifacts
+out/
+dist/
+
+# IDE specific files
+.vscode/*
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+
+# Environment files
+.env
+
+# Logs
+logs/
+*.log
+
+# OS generated files
+.DS_Store
+Thumbs.db
