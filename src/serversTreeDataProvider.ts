@@ -13,6 +13,14 @@ export class ServerTreeDataProvider implements vscode.TreeDataProvider<vscode.Tr
     }
 
     getTreeItem(element: vscode.TreeItem): vscode.TreeItem {
+        if (element.contextValue === 'file') {
+            element.command = {
+                command: 'starsfall.openFile',
+                title: 'Open File',
+                arguments: [element]
+            };
+            this.logChannel.appendLine(`[DEBUG] 设置文件节点命令: ${element.label}`);
+        }
         return element;
     }
 
@@ -153,7 +161,7 @@ export class ServerTreeDataProvider implements vscode.TreeDataProvider<vscode.Tr
     }
 
     private getParentPath(element: vscode.TreeItem): string {
-        const parentPath = element.label as string;
+        const parentPath = element.resourceUri?.path as string;
         if (!parentPath) {
             throw new Error('Parent path is undefined');
         }
@@ -161,7 +169,136 @@ export class ServerTreeDataProvider implements vscode.TreeDataProvider<vscode.Tr
     }
 
     private getConnectionString(element: vscode.TreeItem): string {
-        return element.label as string;
+        return element.resourceUri?.authority as string;
+    }
+
+    public async openFile(element: vscode.TreeItem): Promise<void> {
+        const filePath = this.getParentPath(element);
+        const connectionString = this.getConnectionString(element);
+        const privateKeyPath = this.servers.get(connectionString);
+        this.logChannel.appendLine(`[DEBUG] 尝试打开文件: ${filePath}`);
+        // 常见可执行文件扩展名列表
+        const executableExtensions = [
+            '.exe', '.dll', '.bat', '.cmd', '.msi', // Windows
+            '.jar', '.war', '.ear', // Java
+            '.bin', '.run', '.app', // Linux/macOS
+            '.so', '.dylib', // 动态库
+            '.pyc', '.pyo', '.pyd' // Python
+        ];
+        
+        const lowerCasePath = filePath.toLowerCase();
+        
+        // 检查是否为可执行文件
+        if (executableExtensions.some(ext => lowerCasePath.endsWith(ext))) {
+            vscode.window.showWarningMessage('无法在编辑器中打开可执行文件，但支持下载。');
+            return;
+        }
+        
+        // 检查文件是否为二进制类型
+        const isBinary = await this.isBinaryFile(connectionString, privateKeyPath, filePath);
+        if (isBinary) {
+            vscode.window.showWarningMessage('无法打开二进制文件。');
+            return;
+        }
+
+        // 读取文件内容
+        const content = await this.readRemoteFile(connectionString, privateKeyPath, filePath);
+        if (content) {
+            this.logChannel.appendLine(`[DEBUG] 文件内容读取成功: ${filePath}`);
+            const document = await vscode.workspace.openTextDocument({
+                content: content,
+                language: this.getLanguageForFile(filePath)
+            });
+        } else {
+            this.logChannel.appendLine(`[ERROR] 文件内容读取失败: ${filePath}`);
+        }
+    }
+
+    public async downloadFile(filePath: string, connectionString: string, privateKeyPath?: string): Promise<void> {
+        // 实现文件下载逻辑
+        const content = await this.readRemoteFile(connectionString, privateKeyPath, filePath);
+        if (content) {
+            const uri = await vscode.window.showSaveDialog({
+                defaultUri: vscode.Uri.file(filePath.split('/').pop() || 'download')
+            });
+            if (uri) {
+                await vscode.workspace.fs.writeFile(uri, Buffer.from(content));
+                vscode.window.showInformationMessage(`文件已下载到: ${uri.fsPath}`);
+            }
+        }
+    }
+
+    private async isBinaryFile(connectionString: string, privateKeyPath?: string, filePath?: string): Promise<boolean> {
+        // 实现 SFTP 读取文件内容并检测是否为二进制
+        const content = await this.readRemoteFile(connectionString, privateKeyPath, filePath);
+        if (!content) return false;
+        
+        // 检测二进制文件的常见特征
+        const binaryThreshold = 0.3; // 30% 的非文本字符
+        let nonTextChars = 0;
+        for (let i = 0; i < Math.min(content.length, 4096); i++) {
+            if (content.charCodeAt(i) === 0 || content.charCodeAt(i) > 127) {
+                nonTextChars++;
+            }
+        }
+        return nonTextChars / Math.min(content.length, 4096) > binaryThreshold;
+    }
+
+    private async readRemoteFile(connectionString: string, privateKeyPath?: string, filePath?: string): Promise<string> {
+        // 解析 connectionString
+        const parts = connectionString.split(':');
+        const [username, host] = parts[0].split('@');
+        const port = parts.length >= 2 ? parseInt(parts[1]) : 22;
+        
+        const conn = new Client();
+        
+        return new Promise((resolve, reject) => {
+            conn.on('ready', () => {
+                conn.sftp((err, sftp) => {
+                    if (err) {
+                        this.logChannel.appendLine(`[ERROR] SFTP 连接失败: ${err.message}`);
+                        reject(err);
+                        return;
+                    }
+                    
+                    sftp.readFile(filePath || '.', (err, data) => {
+                        if (err) {
+                            this.logChannel.appendLine(`[ERROR] 读取文件失败: ${filePath}, ${err.message}`);
+                            reject(err);
+                            return;
+                        }
+                        
+                        resolve(data.toString());
+                    });
+                });
+            }).on('error', (err) => {
+                this.logChannel.appendLine(`[ERROR] SSH 连接失败: ${err.message}`);
+                reject(err);
+            }).connect({
+                host,
+                port,
+                username,
+                privateKey: privateKeyPath ? readFileSync(privateKeyPath) : undefined,
+                readyTimeout: 20000
+            });
+        });
+    }
+
+    private getLanguageForFile(filePath: string): string {
+        const extension = filePath.split('.').pop()?.toLowerCase();
+        switch (extension) {
+            case 'js': return 'javascript';
+            case 'ts': return 'typescript';
+            case 'json': return 'json';
+            case 'html': return 'html';
+            case 'css': return 'css';
+            case 'md': return 'markdown';
+            case 'py': return 'python';
+            case 'java': return 'java';
+            case 'xml': return 'xml';
+            case 'sh': return 'shellscript';
+            default: return 'plaintext';
+        }
     }
 
     private async listRemoteFiles(

@@ -31,6 +31,16 @@
       {
         "command": "starsfall.focusServersExplorer",
         "title": "Starsfall: Focus Servers Explorer"
+      },
+      {
+        "command": "starsfall.downloadFile",
+        "title": "Starsfall: Download File",
+        "when": "resourceLangId == 'plaintext'"
+      },
+      {
+        "command": "starsfall.openFile",
+        "title": "Starsfall: Open File",
+        "when": "resourceLangId == 'plaintext'"
       }
     ],
     "viewsContainers": {

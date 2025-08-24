@@ -30,12 +30,25 @@ export function activate(context: vscode.ExtensionContext) {
     vscode.commands.executeCommand('workbench.view.extension.serversExplorer');
   });
 
+  const downloadFileCommand = vscode.commands.registerCommand('starsfall.downloadFile', (fileItem) => {
+    const fileExplorerManager = FileExplorerManager.getInstance();
+    const treeDataProvider = fileExplorerManager.getTreeDataProvider();
+    treeDataProvider.downloadFile(fileItem.resourceUri.path, fileItem.label);
+  });
+
+  const openFileCommand = vscode.commands.registerCommand('starsfall.openFile', (fileItem) => {
+    const fileExplorerManager = FileExplorerManager.getInstance();
+    const treeDataProvider = fileExplorerManager.getTreeDataProvider();
+    treeDataProvider.openFile(fileItem);
+  });
+
   context.subscriptions.push(
     connectServerCommand,
     editServerCommand,
     removeServerCommand,
     disconnectAllCommand,
-    focusServersExplorerCommand
+    focusServersExplorerCommand,
+    downloadFileCommand
   );
 }
 
