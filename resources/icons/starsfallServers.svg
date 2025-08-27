@@ -1,0 +1,62 @@
+<svg width="100" height="100" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
+  <!-- VSCode风格窗口轮廓 -->
+  <rect x="10" y="10" width="80" height="80" rx="5" fill="none" stroke="#0078D4" stroke-width="2"/>
+  
+  <!-- 左侧：多台服务器表示，使用竖线分隔 -->
+  <g stroke="#0078D4" stroke-width="1.5">
+    <!-- 服务器1 -->
+    <rect x="20" y="20" width="15" height="10" fill="none"/>
+    <line x1="20" y1="25" x2="35" y2="25"/>
+    <line x1="20" y1="28" x2="35" y2="28"/>
+    <text x="27.5" y="25" font-size="4" text-anchor="middle" fill="#0078D4">1</text>
+    
+    <!-- 服务器分隔线 -->
+    <line x1="27.5" y1="30" x2="27.5" y2="32" stroke="#0078D4" stroke-width="1"/>
+    <text x="27.5" y="35" font-size="5" text-anchor="middle" fill="#0078D4">|</text>
+    
+    <!-- 服务器2 -->
+    <rect x="20" y="37" width="15" height="10" fill="none"/>
+    <line x1="20" y1="42" x2="35" y2="42"/>
+    <line x1="20" y1="45" x2="35" y2="45"/>
+    <text x="27.5" y="42" font-size="4" text-anchor="middle" fill="#0078D4">2</text>
+    
+    <!-- 服务器分隔线 -->
+    <line x1="27.5" y1="47" x2="27.5" y2="49" stroke="#0078D4" stroke-width="1"/>
+    <text x="27.5" y="52" font-size="5" text-anchor="middle" fill="#0078D4">|</text>
+    
+    <!-- 服务器3 -->
+    <rect x="20" y="54" width="15" height="10" fill="none"/>
+    <line x1="20" y1="59" x2="35" y2="59"/>
+    <line x1="20" y1="62" x2="35" y2="62"/>
+    <text x="27.5" y="59" font-size="4" text-anchor="middle" fill="#0078D4">3</text>
+  </g>
+  
+  <!-- 右侧：三个文件夹图标，每个对应一个服务器 -->
+  <g stroke="#0078D4" stroke-width="1.5" fill="none">
+    <!-- 文件夹1对应服务器1 -->
+    <path d="M60,22 L68,22 L70,25 L70,32 L60,32 L60,22" />
+    <line x1="60" y1="25" x2="68" y2="25" />
+    <text x="65" y="29" font-size="4" text-anchor="middle" fill="#0078D4">S1</text>
+    
+    <!-- 文件夹2对应服务器2 -->
+    <path d="M60,39 L68,39 L70,42 L70,49 L60,49 L60,39" />
+    <line x1="60" y1="42" x2="68" y2="42" />
+    <text x="65" y="46" font-size="4" text-anchor="middle" fill="#0078D4">S2</text>
+    
+    <!-- 文件夹3对应服务器3 -->
+    <path d="M60,56 L68,56 L70,59 L70,66 L60,66 L60,56" />
+    <line x1="60" y1="59" x2="68" y2="59" />
+    <text x="65" y="63" font-size="4" text-anchor="middle" fill="#0078D4">S3</text>
+  </g>
+  
+  <!-- 连接线：每个服务器连接到对应的文件夹，使用虚线 -->
+  <g stroke="#0078D4" stroke-width="1" stroke-dasharray="2,2">
+    <line x1="35" y1="25" x2="60" y2="27"/>
+    <line x1="35" y1="42" x2="60" y2="44"/>
+    <line x1="35" y1="59" x2="60" y2="61"/>
+  </g>
+  
+  <!-- 底部：终端表示 -->
+  <rect x="25" y="75" width="50" height="15" rx="2" fill="none" stroke="#0078D4" stroke-width="1.5"/>
+  <text x="30" y="83" font-size="5" font-family="monospace" fill="#0078D4">$ ssh user@host</text>
+</svg>

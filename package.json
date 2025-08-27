@@ -48,7 +48,7 @@
         {
           "id": "serversExplorer",
           "title": "Servers Explorer",
-          "icon": "resources/icons/server.svg"
+          "icon": "resources/icons/starsfallServers.svg"
         }
       ]
     },
@@ -57,7 +57,7 @@
         {
           "id": "serversList",
           "name": "Servers",
-          "icon": "resources/icons/server.svg"
+          "icon": "resources/icons/starsfallServers.svg"
         }
       ]
     }
