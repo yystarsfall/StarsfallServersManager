@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import { ServerManager } from './serverManager';
 import { FileExplorerManager } from './fileExplorerManager';
+import { SshFileSystemProvider } from './sshFileSystemProvider';
 
 // 全局单例
 const fileExplorerManager = FileExplorerManager.getInstance();
@@ -8,6 +9,24 @@ const serverManager = new ServerManager(fileExplorerManager);
 
 export function activate(context: vscode.ExtensionContext) {
   console.log('Starsfall Servers Manager is now active!');
+
+      // 全局异常监听
+    process.on('unhandledRejection', (err) => {
+        console.error('[UNHANDLED REJECTION]', err);
+    });
+
+    process.on('uncaughtException', (err) => {
+        console.error('[UNCAUGHT EXCEPTION]', err);
+    });
+
+  // 注册文件系统提供者
+  const sshFsProvider = new SshFileSystemProvider(fileExplorerManager.getTreeDataProvider());
+  context.subscriptions.push(
+    vscode.workspace.registerFileSystemProvider('ssh', sshFsProvider, {
+        isCaseSensitive: false, // 根据需求调整
+        isReadonly: false       // 允许写入
+    })
+  );
 
   // 注册 TreeDataProvider
   vscode.window.registerTreeDataProvider('serversList', fileExplorerManager.getTreeDataProvider());
@@ -33,7 +52,7 @@ export function activate(context: vscode.ExtensionContext) {
   const downloadFileCommand = vscode.commands.registerCommand('starsfall.downloadFile', (fileItem) => {
     const fileExplorerManager = FileExplorerManager.getInstance();
     const treeDataProvider = fileExplorerManager.getTreeDataProvider();
-    treeDataProvider.downloadFile(fileItem.resourceUri.path, fileItem.label);
+    treeDataProvider.downloadFile(fileItem);
   });
 
   const openFileCommand = vscode.commands.registerCommand('starsfall.openFile', (fileItem) => {

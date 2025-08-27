@@ -27,15 +27,15 @@ export class ServerTreeDataProvider implements vscode.TreeDataProvider<vscode.Tr
     getParent(element: vscode.TreeItem): vscode.ProviderResult<vscode.TreeItem> {
         if (!element) return null;
         if (element.contextValue === 'server') return null;
-        
+
         if (element.resourceUri) {
             const uri = element.resourceUri;
             const pathParts = uri.path.split('/').filter(p => p);
-            
+
             if (pathParts.length === 1) {
                 return this.getServer(uri.authority);
             }
-            
+
             const parentPath = pathParts.slice(0, -1).join('/');
             const parentUri = vscode.Uri.parse(`ssh://${uri.authority}/${parentPath}`);
             const parentItem = new vscode.TreeItem(
@@ -46,7 +46,7 @@ export class ServerTreeDataProvider implements vscode.TreeDataProvider<vscode.Tr
             parentItem.contextValue = 'directory';
             return parentItem;
         }
-        
+
         return null;
     }
 
@@ -88,7 +88,7 @@ export class ServerTreeDataProvider implements vscode.TreeDataProvider<vscode.Tr
                     if (!parentUri) {
                         throw new Error('Parent resource URI is undefined');
                     }
-                    item.resourceUri = vscode.Uri.parse(`ssh://${parentUri.authority}/${parentUri.path}/${file.filename}`);
+                    item.resourceUri = vscode.Uri.parse(`ssh://${parentUri.authority}${parentUri.path}/${file.filename}`);
                     this.logChannel.appendLine(`[DEBUG] 设置子文件夹 resourceUri: ${item.resourceUri.toString()}`);
                 }
                 return item;
@@ -132,7 +132,7 @@ export class ServerTreeDataProvider implements vscode.TreeDataProvider<vscode.Tr
                     if (!parentUri) {
                         throw new Error('Parent resource URI is undefined');
                     }
-                    item.resourceUri = vscode.Uri.parse(`ssh://${parentUri.authority}/${parentUri.path}/${file.filename}`);
+                    item.resourceUri = vscode.Uri.parse(`ssh://${parentUri.authority}${parentUri.path}/${file.filename}`);
                     this.logChannel.appendLine(`[DEBUG] 设置子文件夹 resourceUri: ${item.resourceUri.toString()}`);
                 }
                 return item;
@@ -160,6 +160,23 @@ export class ServerTreeDataProvider implements vscode.TreeDataProvider<vscode.Tr
         this._onDidChangeTreeData.fire(undefined);
     }
 
+    public getSshConfig(connectionString: string): any {
+        const [username, hostPort] = connectionString.split('@');
+        const [host, port] = hostPort.split(':');
+        return {
+            host: host,
+            port: port ? parseInt(port) : 22,
+            username: username,
+            privateKey: this.getPrivateKeyPath(connectionString),
+            //passphrase: '你的密钥密码（如果有）',
+            readyTimeout: 200000,
+            //tryKeyboard: true
+        }
+    }
+    public getPrivateKeyPath(connectionString: string): string | undefined {
+        return this.servers.get(connectionString);
+    }
+
     private getParentPath(element: vscode.TreeItem): string {
         const parentPath = element.resourceUri?.path as string;
         if (!parentPath) {
@@ -185,36 +202,44 @@ export class ServerTreeDataProvider implements vscode.TreeDataProvider<vscode.Tr
             '.so', '.dylib', // 动态库
             '.pyc', '.pyo', '.pyd' // Python
         ];
-        
+
         const lowerCasePath = filePath.toLowerCase();
-        
+
         // 检查是否为可执行文件
         if (executableExtensions.some(ext => lowerCasePath.endsWith(ext))) {
             vscode.window.showWarningMessage('无法在编辑器中打开可执行文件，但支持下载。');
             return;
         }
-        
+
         // 检查文件是否为二进制类型
         const isBinary = await this.isBinaryFile(connectionString, privateKeyPath, filePath);
         if (isBinary) {
-            vscode.window.showWarningMessage('无法打开二进制文件。');
+            vscode.window.showWarningMessage('无法在编辑器中打开二进制文件，但支持下载。');
             return;
         }
 
-        // 读取文件内容
-        const content = await this.readRemoteFile(connectionString, privateKeyPath, filePath);
-        if (content) {
-            this.logChannel.appendLine(`[DEBUG] 文件内容读取成功: ${filePath}`);
-            const document = await vscode.workspace.openTextDocument({
-                content: content,
-                language: this.getLanguageForFile(filePath)
-            });
-        } else {
-            this.logChannel.appendLine(`[ERROR] 文件内容读取失败: ${filePath}`);
+        try {
+            const uri = vscode.Uri.parse(`ssh://${connectionString}${filePath}`);
+            const doc = await vscode.workspace.openTextDocument(uri);
+            await vscode.window.showTextDocument(doc);
+        } catch (err) {
+            if (err instanceof Error && err.message.includes('Permission denied')) {
+                if (!privateKeyPath) {
+                    vscode.window.showErrorMessage('打开文件失败: 需要私钥进行身份验证，但未提供私钥路径。请检查服务器配置。');
+                } else {
+                    vscode.window.showErrorMessage('打开文件失败: 私钥验证失败。请检查私钥路径是否正确。');
+                }
+            } else {
+                vscode.window.showErrorMessage(`打开文件失败: ${err instanceof Error ? err.message : '未知错误'}`);
+            }
         }
     }
 
-    public async downloadFile(filePath: string, connectionString: string, privateKeyPath?: string): Promise<void> {
+    public async downloadFile(element: vscode.TreeItem): Promise<void> {
+
+        const filePath = this.getParentPath(element);
+        const connectionString = this.getConnectionString(element);
+        const privateKeyPath = this.servers.get(connectionString);
         // 实现文件下载逻辑
         const content = await this.readRemoteFile(connectionString, privateKeyPath, filePath);
         if (content) {
@@ -232,7 +257,7 @@ export class ServerTreeDataProvider implements vscode.TreeDataProvider<vscode.Tr
         // 实现 SFTP 读取文件内容并检测是否为二进制
         const content = await this.readRemoteFile(connectionString, privateKeyPath, filePath);
         if (!content) return false;
-        
+
         // 检测二进制文件的常见特征
         const binaryThreshold = 0.3; // 30% 的非文本字符
         let nonTextChars = 0;
@@ -249,9 +274,9 @@ export class ServerTreeDataProvider implements vscode.TreeDataProvider<vscode.Tr
         const parts = connectionString.split(':');
         const [username, host] = parts[0].split('@');
         const port = parts.length >= 2 ? parseInt(parts[1]) : 22;
-        
+
         const conn = new Client();
-        
+
         return new Promise((resolve, reject) => {
             conn.on('ready', () => {
                 conn.sftp((err, sftp) => {
@@ -260,14 +285,12 @@ export class ServerTreeDataProvider implements vscode.TreeDataProvider<vscode.Tr
                         reject(err);
                         return;
                     }
-                    
                     sftp.readFile(filePath || '.', (err, data) => {
                         if (err) {
                             this.logChannel.appendLine(`[ERROR] 读取文件失败: ${filePath}, ${err.message}`);
                             reject(err);
                             return;
-                        }
-                        
+                        }                        
                         resolve(data.toString());
                     });
                 });

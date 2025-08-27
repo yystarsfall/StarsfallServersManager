@@ -6,7 +6,8 @@ node_modules/
 test/
 
 # 忽略构建中间文件
-out/
+!out/
+!dist/
 
 # 忽略日志和临时文件
 *.log
