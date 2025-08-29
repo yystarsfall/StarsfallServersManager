@@ -1,0 +1,23 @@
+# 构建输出
+/dist/
+/out/
+
+# 依赖目录
+/node_modules/
+
+# 日志文件
+*.log
+
+# 测试数据
+/test/
+
+# 本地配置文件
+**/.env
+**/config.local.*
+
+# 忽略 IDE 特定文件
+.vscode/
+.idea/
+
+# 忽略 VS Code 扩展安装包
+*.vsix
