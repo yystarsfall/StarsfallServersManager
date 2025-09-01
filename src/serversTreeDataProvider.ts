@@ -235,24 +235,6 @@ export class ServerTreeDataProvider implements vscode.TreeDataProvider<vscode.Tr
         }
     }
 
-    public async downloadFile(element: vscode.TreeItem): Promise<void> {
-
-        const filePath = this.getParentPath(element);
-        const connectionString = this.getConnectionString(element);
-        const privateKeyPath = this.servers.get(connectionString);
-        // 实现文件下载逻辑
-        const content = await this.readRemoteFile(connectionString, privateKeyPath, filePath);
-        if (content) {
-            const uri = await vscode.window.showSaveDialog({
-                defaultUri: vscode.Uri.file(filePath.split('/').pop() || 'download')
-            });
-            if (uri) {
-                await vscode.workspace.fs.writeFile(uri, Buffer.from(content));
-                vscode.window.showInformationMessage(`文件已下载到: ${uri.fsPath}`);
-            }
-        }
-    }
-
     private async isBinaryFile(connectionString: string, privateKeyPath?: string, filePath?: string): Promise<boolean> {
         // 实现 SFTP 读取文件内容并检测是否为二进制
         const content = await this.readRemoteFile(connectionString, privateKeyPath, filePath);

@@ -65,6 +65,12 @@ Starsfall Servers Manager 是一个 TypeScript 语言写的 VS Code 扩展，用
 | `starsfall.removeServer` | 移除现有的 Linux 服务器配置 |
 | `starsfall.disconnectAll` | 一键断开所有服务器连接 |
 
+## 文件上传和下载
+1. ┌──(root💀kali_xuegod53)-[~]  
+   └─# rz  --> 上传文件  
+   ┌──(root💀kali_xuegod53)-[~]  
+   └─# sz test.txt -->> 下载文件
+
 ## 开发指南
 ### 构建项目
 1. 安装依赖：
@@ -78,6 +84,10 @@ Starsfall Servers Manager 是一个 TypeScript 语言写的 VS Code 扩展，用
 3. 开发模式（实时编译）：
    ```bash
    npm run watch
+   ```
+4. 打包为 VSIX：
+   ```bash
+   vsce package
    ```
 
 ### 依赖说明
