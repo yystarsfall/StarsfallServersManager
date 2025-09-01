@@ -6,6 +6,7 @@ import { FileExplorerManager } from './fileExplorerManager';
 
 export class ServerManager {
     private fileExplorerManager: FileExplorerManager;
+    private terminals: Map<string, vscode.Terminal> = new Map();
 
     constructor(fileExplorerManager: FileExplorerManager) {
         this.fileExplorerManager = fileExplorerManager;
@@ -37,7 +38,21 @@ export class ServerManager {
         }
     }
 
-    
+    //修改 用户的.ssh/config 文件
+    public async editServer() {
+        try {
+            const sshConfig = await readSSHConfig();
+            const selectedServer = await showServerList(sshConfig);
+            if (!selectedServer || selectedServer.isNew) return;
+            const updatedDetails = await promptForServerDetails();
+            if (!updatedDetails) return;
+            await writeSSHConfig(updatedDetails);
+            vscode.window.showInformationMessage(`服务器 ${selectedServer.name} 已更新`);
+        } catch (error) {
+            vscode.window.showErrorMessage(`编辑服务器失败: ${error instanceof Error ? error.message : String(error)}`);
+        }
+    }
+
     public async connectAndOpenResources(serverDetails: any) {
         const { name, host, port, username, privateKeyPath } = serverDetails;
         const connectionString = `${username}@${host}:${port}`;
@@ -49,7 +64,7 @@ export class ServerManager {
                 pty: new TerminalProvider(connectionString, privateKeyPath, name)
             });
             terminal.show();
-
+            this.terminals.set(connectionString, terminal);
             // 检查服务器是否已存在
             const treeView = this.fileExplorerManager.getTreeDataProvider().getServer(connectionString);
             if (!treeView) {
@@ -60,50 +75,43 @@ export class ServerManager {
         }
     }
 
-    // public async connectAndOpenResources(serverDetails: any) {
-    //     const { name, host, port, username, password, privateKeyPath } = serverDetails;
-    //     const connectionString = `${username}@${host}:${port}`;
+    public async disconnectServer() {
+        // 将 terminals 的键转换为 QuickPickItem 数组
+        const serverOptions = Array.from(this.terminals.keys()).map(label => ({
+            label,
+            description: `SSH 终端: ${label}`
+        }));
 
-    //     try {
-    //         const terminal = vscode.window.createTerminal({
-    //             name: `SSH: ${name}`,
-    //             shellPath: 'ssh',
-    //             shellArgs: [
-    //                 `${username}@${host}`,
-    //                 `-p`, `${port}`,
-    //                 privateKeyPath ? `-i` : ``,
-    //                 privateKeyPath ? `${privateKeyPath}` : ``,
-    //                 `-t`, `bash`
-    //             ],
-    //             cwd: require('os').homedir()
-    //         });
-    //         terminal.show();
+        // 弹出已连接的选择框
+        const selectedServer = await vscode.window.showQuickPick(serverOptions, {
+            placeHolder: '选择要断开的服务器'
+        });
+        if (!selectedServer) return;
 
-    //         // 监听终端输出
-    //         const disposable = terminal.onDidReceiveData(async (data: string) => {
-    //             const input = data.trim();
-    //             if (input === 'rz') {
-    //                 await this.handleFileUpload(connectionString, privateKeyPath);
-    //             } else if (input === 'sz') {
-    //                 await this.handleFileDownload(connectionString, privateKeyPath);
-    //             }
-    //         });
+        // 获取用户选择的服务器 ID
+        const selectedServerId = selectedServer.label;
 
-    //         // 检查服务器是否已存在
-    //         const treeView = this.fileExplorerManager.getTreeDataProvider().getServer(connectionString);
-    //         if (!treeView) {
-    //             await this.fileExplorerManager.openFileExplorer(connectionString, privateKeyPath);
-    //         }
-    //     } catch (error) {
-    //         const msg = `SSH连接失败: ${error instanceof Error ? error.message : String(error)}\n`
-    //             + `请检查:\n`
-    //             + `1. 私钥路径: ${privateKeyPath}\n`
-    //             + `2. 服务器状态: ${host}:${port}\n`
-    //             + `3. 网络连通性\n`
-    //             + `4. 私钥权限和格式\n`
-    //             + `5. 确保 VSCode 以管理员权限运行`;
-    //         vscode.window.showErrorMessage(msg);
-    //     }
-    // }
+        // 断开服务器
+        this.fileExplorerManager.disconnectServer(selectedServerId);
+
+        // 关闭终端
+        const terminal = this.terminals.get(selectedServerId);
+        if (terminal) {
+            terminal.sendText('exit'); // 发送退出命令
+            terminal.dispose(); // 关闭终端
+        }
+        this.terminals.delete(selectedServerId);
+    }
+
+    public disconnectAllTerminals(): void {
+        this.fileExplorerManager.disconnectServer('');
+        this.terminals.forEach(terminal => {
+            terminal.sendText('exit'); // 发送退出命令
+            terminal.dispose(); // 关闭终端
+        });
+        this.terminals.clear(); // 清空缓存 // 清空文件资源管理器中的服务器列表
+    }
+
+
 
 }
