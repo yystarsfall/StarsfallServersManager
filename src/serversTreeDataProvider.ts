@@ -156,7 +156,15 @@ export class ServerTreeDataProvider implements vscode.TreeDataProvider<vscode.Tr
     }
 
     public removeServer(connectionString: string): void {
+        // 从 Map 中移除服务器
         this.servers.delete(connectionString);
+        
+        // 强制触发全局刷新，确保节点被完全移除
+        this._onDidChangeTreeData.fire(undefined);
+    }
+
+    public clearAllServers(): void {
+        this.servers.clear();
         this._onDidChangeTreeData.fire(undefined);
     }
 

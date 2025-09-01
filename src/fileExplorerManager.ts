@@ -5,7 +5,7 @@ export class FileExplorerManager {
     private static instance: FileExplorerManager;
     private treeDataProvider!: ServerTreeDataProvider;
     private treeView!: vscode.TreeView<vscode.TreeItem>;
-    
+
     private constructor() {
         if (!FileExplorerManager.instance) {
             this.treeDataProvider = new ServerTreeDataProvider();
@@ -16,7 +16,7 @@ export class FileExplorerManager {
         }
         return FileExplorerManager.instance;
     }
-    
+
     public static getInstance(): FileExplorerManager {
         if (!FileExplorerManager.instance) {
             FileExplorerManager.instance = new FileExplorerManager();
@@ -28,10 +28,10 @@ export class FileExplorerManager {
         try {
             // 添加服务器并强制刷新TreeView
             this.treeDataProvider.addServer(serverId, privateKeyPath);
-            
+
             // 确保TreeView已刷新
             await new Promise(resolve => setTimeout(resolve, 100));
-            
+
             // 获取服务器节点并尝试reveal
             const serverItem = this.treeDataProvider.getServer(serverId);
             if (serverItem) {
@@ -40,7 +40,7 @@ export class FileExplorerManager {
                     select: true
                 });
             }
-            
+
             // 聚焦到Servers Explorer
             await vscode.commands.executeCommand('starsfall.focusServersExplorer');
         } catch (error) {
@@ -49,7 +49,15 @@ export class FileExplorerManager {
     }
 
     public disconnectServer(serverId: string): void {
+        if (!serverId) {
+            // 如果没有提供 serverId，则断开所有服务器连接
+            this.treeDataProvider.clearAllServers();
+            return;
+        }
+        // 移除指定服务器
         this.treeDataProvider.removeServer(serverId);
+        // 强制刷新 TreeView
+        this.treeView.title = this.treeView.title;
     }
 
     public getTreeDataProvider(): ServerTreeDataProvider {

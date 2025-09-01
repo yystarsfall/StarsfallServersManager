@@ -34,17 +34,11 @@ export function activate(context: vscode.ExtensionContext) {
 
   // Register commands
   const connectServerCommand = vscode.commands.registerCommand('starsfall.connectServer', () => serverManager.connectServer());
-  const editServerCommand = vscode.commands.registerCommand('starsfall.editServer', () => {
-    vscode.window.showInformationMessage('Edit Server command executed.');
-  });
+  const editServerCommand = vscode.commands.registerCommand('starsfall.editServer', () => serverManager.editServer());
 
-  const removeServerCommand = vscode.commands.registerCommand('starsfall.removeServer', () => {
-    vscode.window.showInformationMessage('Remove Server command executed.');
-  });
+  const removeServerCommand = vscode.commands.registerCommand('starsfall.removeServer', () => serverManager.disconnectServer());
 
-  const disconnectAllCommand = vscode.commands.registerCommand('starsfall.disconnectAll', () => {
-    vscode.window.showInformationMessage('Disconnect All command executed.');
-  });
+  const disconnectAllCommand = vscode.commands.registerCommand('starsfall.disconnectAll', () => serverManager.disconnectAllTerminals());
 
   const focusServersExplorerCommand = vscode.commands.registerCommand('starsfall.focusServersExplorer', () => {
     vscode.commands.executeCommand('workbench.view.extension.serversExplorer');
