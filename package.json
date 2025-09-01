@@ -2,7 +2,7 @@
   "name": "starsfall-servers-manager",
   "displayName": "Starsfall Servers Manager",
   "description": "A VS Code extension to manage multiple Linux servers.",
-  "version": "0.0.1",
+  "version": "1.0.0",
   "engines": {
     "vscode": "^1.75.0"
   },
@@ -31,6 +31,11 @@
       {
         "command": "starsfall.focusServersExplorer",
         "title": "Starsfall: Focus Servers Explorer"
+      },
+      {
+        "command": "starsfall.uploadFile",
+        "title": "Starsfall: Upload File",
+        "when": "resourceLangId == 'plaintext'"
       },
       {
         "command": "starsfall.downloadFile",
@@ -66,7 +71,7 @@
     "vscode:prepublish": "npm run build",
     "build": "webpack",
     "watch": "webpack --watch",
-    "test": "node ./out/test/runTest.js"
+    "test": "node ./dist/test/runTest.js"
   },
   "devDependencies": {
     "@types/node": "^16.18.126",

@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import { ServerManager } from './serverManager';
+import { TerminalProvider } from './terminalProvider';
 import { FileExplorerManager } from './fileExplorerManager';
 import { SshFileSystemProvider } from './sshFileSystemProvider';
 
@@ -10,21 +11,21 @@ const serverManager = new ServerManager(fileExplorerManager);
 export function activate(context: vscode.ExtensionContext) {
   console.log('Starsfall Servers Manager is now active!');
 
-      // 全局异常监听
-    process.on('unhandledRejection', (err) => {
-        console.error('[UNHANDLED REJECTION]', err);
-    });
+  // 全局异常监听
+  process.on('unhandledRejection', (err) => {
+    console.error('[UNHANDLED REJECTION]', err);
+  });
 
-    process.on('uncaughtException', (err) => {
-        console.error('[UNCAUGHT EXCEPTION]', err);
-    });
+  process.on('uncaughtException', (err) => {
+    console.error('[UNCAUGHT EXCEPTION]', err);
+  });
 
   // 注册文件系统提供者
   const sshFsProvider = new SshFileSystemProvider(fileExplorerManager.getTreeDataProvider());
   context.subscriptions.push(
     vscode.workspace.registerFileSystemProvider('ssh', sshFsProvider, {
-        isCaseSensitive: false, // 根据需求调整
-        isReadonly: false       // 允许写入
+      isCaseSensitive: false, // 根据需求调整
+      isReadonly: false       // 允许写入
     })
   );
 
@@ -49,12 +50,20 @@ export function activate(context: vscode.ExtensionContext) {
     vscode.commands.executeCommand('workbench.view.extension.serversExplorer');
   });
 
-  const downloadFileCommand = vscode.commands.registerCommand('starsfall.downloadFile', (fileItem) => {
-    const fileExplorerManager = FileExplorerManager.getInstance();
-    const treeDataProvider = fileExplorerManager.getTreeDataProvider();
-    treeDataProvider.downloadFile(fileItem);
+  const uploadFileCommand = vscode.commands.registerCommand('starsfall.uploadFile', async (args) => {
+    const terminal = vscode.window.activeTerminal;
+    if (terminal && terminal.name.startsWith('SSH:')) {
+      const provider = (terminal as any).creationOptions.pty as TerminalProvider;
+      await provider.handleFileUpload();
+    }
   });
-
+  const downloadFileCommand = vscode.commands.registerCommand('starsfall.downloadFile', async (args) => {
+    const terminal = vscode.window.activeTerminal;
+    if (terminal && terminal.name.startsWith('SSH:')) {
+      const provider = (terminal as any).creationOptions.pty as TerminalProvider;
+      await provider.handleFileDownload();
+    }
+  });
   const openFileCommand = vscode.commands.registerCommand('starsfall.openFile', (fileItem) => {
     const fileExplorerManager = FileExplorerManager.getInstance();
     const treeDataProvider = fileExplorerManager.getTreeDataProvider();
@@ -67,8 +76,10 @@ export function activate(context: vscode.ExtensionContext) {
     removeServerCommand,
     disconnectAllCommand,
     focusServersExplorerCommand,
-    downloadFileCommand
+    uploadFileCommand,
+    downloadFileCommand,
+    openFileCommand
   );
 }
 
-export function deactivate() {}
+export function deactivate() { }
