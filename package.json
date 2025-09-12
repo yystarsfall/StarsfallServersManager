@@ -2,13 +2,18 @@
   "name": "starsfall-servers-manager",
   "displayName": "Starsfall Servers Manager",
   "description": "A VS Code extension to manage multiple Linux servers.",
-  "version": "1.0.0",
+  "version": "1.0.1",
+  "publisher": "starsfall",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/yystarsfall/StarsfallServersManager.git"
+  },
+  "license": "MIT",
+  "keywords": ["linux", "server", "ssh", "remote", "management"],
   "engines": {
     "vscode": "^1.75.0"
   },
-  "categories": [
-    "Other"
-  ],
+  "categories": ["Other"],
   "main": "./dist/extension.js",
   "contributes": {
     "commands": [
