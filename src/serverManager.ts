@@ -3,6 +3,8 @@ import { readSSHConfig, writeSSHConfig } from './sshConfigHandler';
 import { promptForServerDetails, showServerList } from './uiHelper';
 import { TerminalProvider } from './terminalProvider';
 import { FileExplorerManager } from './fileExplorerManager';
+import { Client } from 'ssh2';
+import * as fs from 'fs';
 
 export class ServerManager {
     private fileExplorerManager: FileExplorerManager;
@@ -58,10 +60,15 @@ export class ServerManager {
         const connectionString = `${username}@${host}:${port}`;
 
         try {
+            // 1. 先检测系统类型
+            const systemType = await this.detectSystemType({
+                host, port, username, privateKeyPath
+            });
+
             // 创建自定义终端
             const terminal = vscode.window.createTerminal({
                 name: `SSH: ${name}`,
-                pty: new TerminalProvider(connectionString, privateKeyPath, name)
+                pty: new TerminalProvider(connectionString, privateKeyPath, name, systemType)
             });
             terminal.show();
             this.terminals.set(connectionString, terminal);
@@ -112,6 +119,41 @@ export class ServerManager {
         this.terminals.clear(); // 清空缓存 // 清空文件资源管理器中的服务器列表
     }
 
+    // 独立的系统类型检测方法
+    private async detectSystemType(server: { host: string; port: number; username: string; privateKeyPath?: string }): Promise<string> {
+        return new Promise((resolve, reject) => {
+            const conn = new Client();
+            conn.on('ready', () => {
+                conn.exec('cat /etc/os-release', (err, stream) => {
+                    if (err) {
+                        resolve('unknown');
+                        return;
+                    }
+
+                    let output = '';
+                    stream.on('data', (data: Buffer) => {
+                        output += data.toString();
+                    });
+
+                    stream.on('close', () => {
+                        conn.end();
+                        if (output.includes('kali')) resolve('kali');
+                        else if (output.includes('Ubuntu')) resolve('ubuntu');
+                        else if (output.includes('CentOS')) resolve('centos');
+                        else if (output.includes('Debian')) resolve('debian');
+                        else if (output.includes('parrot')) resolve('parrot');
+                        else if (output.includes('blackarch')) resolve('blackarch');
+                        else resolve('unknown');
+                    });
+                });
+            }).connect({
+                host: server.host,
+                port: server.port,
+                username: server.username,
+                privateKey: server.privateKeyPath ? fs.readFileSync(server.privateKeyPath) : undefined
+            });
+        });
+    }
 
 
 }
