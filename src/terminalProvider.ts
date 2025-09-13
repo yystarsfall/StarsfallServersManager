@@ -28,6 +28,7 @@ export class TerminalProvider implements vscode.Pseudoterminal {
     private terminalHeight: number = 24; //终端高度
     private terminalWidth: number = 80;  //终端宽度
     private currentWorkingDirectory: string = '~';
+    private lastWorkingDirectory: string = '~';
 
     // 实现 Pseudoterminal 接口
     onDidWrite: vscode.Event<string> = this.writeEmitter.event;
@@ -77,13 +78,12 @@ export class TerminalProvider implements vscode.Pseudoterminal {
     }
 
     private processCommand(fullCommand: string): void {
-        const lines = fullCommand.split('\n');
+        const lines = fullCommand.split(' ');
         const baseCommand = lines[0].trim();
         const args = lines.slice(1).filter(line => line.trim() !== '');
 
         // 检测 cd 命令并更新缓存目录
-        if (baseCommand.startsWith('cd ')) {
-            const args = baseCommand.split(' ').slice(1);
+        if (baseCommand.startsWith('cd')) {
             this.handleCdCommand(args[0]);
             return;
         }
@@ -117,16 +117,50 @@ export class TerminalProvider implements vscode.Pseudoterminal {
     // 添加处理 cd 命令的方法
     private async handleCdCommand(path: string): Promise<void> {
         try {
+            let targetPath = path;
+
+            // 处理 cd ~
+            if (path === '~') {
+                targetPath = '$HOME';
+            }
+            // 处理 cd -
+            else if (path === '-') {
+                if (!this.lastWorkingDirectory) {
+                    this.writeEmitter.fire('\r\nNo previous directory to switch to.\r\n');
+                    return;
+                } else if (this.lastWorkingDirectory === '~') {
+                    targetPath = '$HOME';
+                } else {
+                    targetPath = this.lastWorkingDirectory;
+                }
+            }
+            // 处理相对路径（不以 / 开头）
+            else if (!path.startsWith('/')) {
+                // 如果当前目录是 ~，直接拼接路径（远程 Shell 会自动解析 ~）
+                if (this.currentWorkingDirectory === '~') {
+                    targetPath = `$HOME/${path}`;
+                } else {
+                    // 否则拼接当前目录和相对路径
+                    targetPath = `${this.currentWorkingDirectory}/${path}`;
+                }
+                // 规范化路径（移除多余的 ./ 或 ../）
+                targetPath = targetPath.replace(/\/\.\//g, '/').replace(/\/[^\/]+\/\.\.\//g, '/');
+            }
+
             // 通过 SSH 执行 cd 命令并获取新的当前目录
-            const newDir = await this.getActualDirectoryAfterCd(path);
+            const newDir = await this.getActualDirectoryAfterCd(targetPath);
+
+            // 更新上一次的目录
+            this.lastWorkingDirectory = this.currentWorkingDirectory;
             this.currentWorkingDirectory = newDir;
 
             // 发送 cd 命令到远程 shell
             if (this.sshStream) {
-                this.sshStream.write(`cd "${path}"\n`);
+                this.sshStream.write(`cd ${targetPath}\n`);
             }
-        } catch (error) {
+        } catch (error: any) {
             console.error('Failed to change directory:', error);
+            this.writeEmitter.fire(`\r\nFailed to change directory: ${error.message}\r\n`);
         }
     }
 
@@ -427,9 +461,6 @@ export class TerminalProvider implements vscode.Pseudoterminal {
                     this.lineLengths = [0];
                     this.cmd = '';
                     this.cursorPosition = 0;
-                    //prompt = this.getPrompt();
-                    //this.writeEmitter.fire('\r\n' + prompt);
-                    //break;
                 } else {
                     this.writeEmitter.fire('\r\n');
                     this.processCommand(this.cmd);
@@ -441,9 +472,8 @@ export class TerminalProvider implements vscode.Pseudoterminal {
                     this.currentLine = 0;
                     this.currentColumn = 0;
                     this.cursorPosition = 0;
-                    //prompt = this.getPrompt();
-                    //this.writeEmitter.fire(prompt);
-                    //break;
+                    this.lineStartIndexes = [0];
+                    this.lineLengths = [0];
                 }
                 break;
             case 127: // Backspace 键
@@ -607,7 +637,6 @@ export class TerminalProvider implements vscode.Pseudoterminal {
                         // 多行模式：删除当前光标位置字符
                         if (this.currentColumn > 0 && this.currentColumn < this.lineLengths[this.currentLine]) {
                             this.multiLineBuffer = this.multiLineBuffer.slice(0, this.lineStartIndexes[this.currentLine] + this.currentColumn - 1) + this.multiLineBuffer.slice(this.lineStartIndexes[this.currentLine] + this.currentColumn);
-                            //this.writeEmitter.fire('\x1b[D \x1b[D');
                             this.writeEmitter.fire('\x1b[P');
                             this.lineLengths[this.currentLine]--;
                             for (let i = this.currentLine + 1; i < this.lineStartIndexes.length; i++) {
@@ -820,9 +849,6 @@ export class TerminalProvider implements vscode.Pseudoterminal {
                                 resolve(true);
                             })
                             .on('close', async () => {
-                                this.writeEmitter.fire(`File uploaded: ${remotePath}\r\n`);
-                                let prompt = this.getPrompt();
-                                this.writeEmitter.fire(prompt);
                                 resolve(true);
                             })
                             .on('error', (err: Error) => {
@@ -850,10 +876,28 @@ export class TerminalProvider implements vscode.Pseudoterminal {
             let remotePath: string;
             let localPath: string;
             let fileName: string;
-            // 如果 args 包含远程路径，直接使用；否则使用默认路径
-            remotePath = args[0] || './file-to-download';
+
+            // 解析远程路径（支持相对路径）
+            if (args.length > 0) {
+                remotePath = args[0];
+                // 如果是相对路径，拼接当前工作目录
+                if (!remotePath.startsWith('/')) {
+                    if (this.currentWorkingDirectory === '~') {
+                        remotePath = `$HOME/${remotePath}`;
+                    } else {
+                        remotePath = `${this.currentWorkingDirectory}/${remotePath}`;
+                    }
+                    // 规范化路径（移除多余的 ./ 或 ../）
+                    remotePath = remotePath.replace(/\/\.\//g, '/').replace(/\/[^\/]+\/\.\.\//g, '/');
+                }
+            } else {
+                this.writeEmitter.fire('\r\nUsage: sz <remoteFile> [localFile]\r\n');
+                return;
+            }
+
             fileName = path.basename(remotePath);
-            // 如果 args 包含本地路径，直接使用；否则打开保存对话框
+
+            // 解析本地路径（支持用户选择保存位置）
             if (args.length > 1) {
                 localPath = args[1];
             } else {
@@ -892,9 +936,6 @@ export class TerminalProvider implements vscode.Pseudoterminal {
                                 resolve(true);
                             })
                             .on('close', async () => {
-                                this.writeEmitter.fire(`File downloaded: ${remotePath}\r\n`);
-                                let prompt = this.getPrompt();
-                                this.writeEmitter.fire(prompt);
                                 resolve(true);
                             })
                             .on('error', (err) => {
@@ -988,45 +1029,51 @@ export class TerminalProvider implements vscode.Pseudoterminal {
     }
 
     // 获取各种各样系统的提示符
-    private  getPrompt(): string {
+    private getPrompt(): string {
         const username = this.getUsername();
         const hostname = this.getHostName();
         let userSymbol = "@";
         let promptSymbol = this.isRootUser() ? "#" : "$";
 
+        // 获取当前目录
+
+        const currentDir = ['kali', 'parrot', 'blackarch'].includes(this.systemType)
+        ? this.currentWorkingDirectory
+        : (this.currentWorkingDirectory === '~' ? '~' : path.basename(this.currentWorkingDirectory));
+
         switch (this.systemType) {
-            //kali linux 
+            // Kali Linux
             case 'kali': {
                 userSymbol = this.isRootUser() ? "💀" : "@";
-                return `\x1b[34m┌──(\x1b[31m${username}${userSymbol}${hostname}\x1b[34m)-[\x1b[37m${this.currentWorkingDirectory}\x1b[34m]\r\n\x1b[34m└─\x1b[31m${promptSymbol}\x1b[0m `;
+                return `\x1b[34m┌──(\x1b[31m${username}${userSymbol}${hostname}\x1b[34m)-[\x1b[37m${currentDir}\x1b[34m]\r\n\x1b[34m└─\x1b[31m${promptSymbol}\x1b[0m `;
             }
-            //parrot linux
+            // Parrot Linux
             case 'parrot': {
                 userSymbol = this.isRootUser() ? "💀" : "@";
-                return `\x1b[34m┌──(\x1b[31m${username}${userSymbol}${hostname}\x1b[34m)-[\x1b[37m${this.currentWorkingDirectory}\x1b[34m]\r\n\x1b[34m└─\x1b[31m${promptSymbol}\x1b[0m `;
+                return `\x1b[34m┌──(\x1b[31m${username}${userSymbol}${hostname}\x1b[34m)-[\x1b[37m${currentDir}\x1b[34m]\r\n\x1b[34m└─\x1b[31m${promptSymbol}\x1b[0m `;
             }
-            //blackarch linux
+            // BlackArch Linux
             case 'blackarch': {
                 userSymbol = this.isRootUser() ? "💀" : "@";
-                return `\x1b[34m┌──(\x1b[31m${username}${userSymbol}${hostname}\x1b[34m)-[\x1b[37m${this.currentWorkingDirectory}\x1b[34m]\r\n\x1b[34m└─\x1b[31m${promptSymbol}\x1b[0m `;
+                return `\x1b[34m┌──(\x1b[31m${username}${userSymbol}${hostname}\x1b[34m)-[\x1b[37m${currentDir}\x1b[34m]\r\n\x1b[34m└─\x1b[31m${promptSymbol}\x1b[0m `;
             }
-            //ubuntu
+            // Ubuntu
             case 'ubuntu': {
-                return `${username}@${hostname}:${this.currentWorkingDirectory}${promptSymbol} `;
+                return `${username}@${hostname}:${currentDir}${promptSymbol} `;
             }
-            //centos
+            // CentOS
             case 'centos': {
-                return `[${username}@${hostname} ${this.currentWorkingDirectory}]${promptSymbol} `;
+                return `[${username}@${hostname} ${currentDir}]${promptSymbol} `;
             }
-            //debian
+            // Debian
             case 'debian': {
-                return `[${username}@${hostname} ${this.currentWorkingDirectory}]${promptSymbol} `;
+                return `[${username}@${hostname} ${currentDir}]${promptSymbol} `;
             }
+            // 默认情况
             default: {
-                return `[${username}@${hostname} ${this.currentWorkingDirectory}]${promptSymbol} `;
+                return `[${username}@${hostname} ${currentDir}]${promptSymbol} `;
             }
         }
-
     }
 
     private calculatePromptVisibleLength(): number {
@@ -1035,7 +1082,12 @@ export class TerminalProvider implements vscode.Pseudoterminal {
         const isRoot = this.isRootUser();
         const promptSymbol = isRoot ? "#" : "$";
 
-        // kali格式：└─#
+        // 获取当前目录
+        const currentDir = ['kali', 'parrot', 'blackarch'].includes(this.systemType)
+        ? this.currentWorkingDirectory
+        : (this.currentWorkingDirectory === '~' ? '~' : path.basename(this.currentWorkingDirectory));
+
+        // Kali 格式：└─#
         if (this.systemType === 'kali') {
             return 4;
         } else if (this.systemType === 'parrot') {
@@ -1043,11 +1095,11 @@ export class TerminalProvider implements vscode.Pseudoterminal {
         } else if (this.systemType === 'blackarch') {
             return 7;
         } else if (this.systemType === 'ubuntu') {
-            // Ubuntu格式: username@hostname:directory$
-            return username.length + 1 + hostname.length + 1 + this.currentWorkingDirectory.length + promptSymbol.length + 1;
+            // Ubuntu 格式: username@hostname:directory$
+            return username.length + 1 + hostname.length + 1 + currentDir.length + promptSymbol.length + 1;
         } else if (this.systemType === 'centos' || this.systemType === 'debian') {
-            // CentOS/RedHat格式: [username@hostname directory]$
-            return 1 + username.length + 1 + hostname.length + 1 + this.currentWorkingDirectory.length + 1 + promptSymbol.length + 1;
+            // CentOS/RedHat 格式: [username@hostname directory]$
+            return 1 + username.length + 1 + hostname.length + 1 + currentDir.length + 1 + promptSymbol.length + 1;
         } else {
             // 默认格式: username@hostname:~$ 
             return username.length + 1 + hostname.length + 2 + promptSymbol.length + 1;
@@ -1061,9 +1113,33 @@ export class TerminalProvider implements vscode.Pseudoterminal {
                 return [];
             }
 
-            // 提取最后一个单词作为补全输入（如从 "ls -lh he" 中提取 "he"）
-            const lastWord = input.split(/\s+/).pop() || '';
-            // 将 ~ 符号转换为实际的家目录路径
+            const words = input.split(/\s+/);
+            const lastWord = words.pop() || '';
+            const isCommandInput = words.length === 0; // 是否是命令输入（而非路径输入）
+
+            // 如果是命令输入，补全命令列表
+            if (isCommandInput) {
+                const commonCommands = [
+                    'ls', 'cd', 'pwd', 'cat', 'mkdir', 'rm', 'cp', 'mv',
+                    'sz', 'rz', 'vim', 'nano', 'grep', 'find', 'chmod',
+                    'ssh', 'scp', 'tar', 'ps', 'top', 'kill', 'df', 'du',
+                    'systemctl', 'systemctl start', 'systemctl stop',
+                    'systemctl restart', 'systemctl status', 'systemctl enable',
+                    'systemctl disable', 'systemctl list-units'
+                ];
+                return commonCommands.filter(cmd => cmd.startsWith(lastWord));
+            }
+
+            // 如果是 systemctl 的子命令补全
+            if (words[0] === 'systemctl' && words.length > 1) {
+                const systemctlSubCommands = [
+                    'start', 'stop', 'restart', 'status',
+                    'enable', 'disable', 'list-units', 'reload'
+                ];
+                return systemctlSubCommands.filter(cmd => cmd.startsWith(lastWord));
+            }
+
+            // 否则补全路径
             let targetDir = this.currentWorkingDirectory;
             if (targetDir === '~') {
                 targetDir = await this.getHomeDirectory();
@@ -1097,7 +1173,7 @@ export class TerminalProvider implements vscode.Pseudoterminal {
             console.log('Suggestions for input:', lastWord, suggestions);
             return suggestions;
         } catch (error) {
-            console.error(`Failed to read remote directory: ${error}`);
+            console.error(`Failed to get tab suggestions: ${error}`);
             return [];
         }
     }
@@ -1174,7 +1250,6 @@ export class TerminalProvider implements vscode.Pseudoterminal {
             if (this.currentLine === 0 && lineDiff > 0) {
                 this.writeEmitter.fire(`\r`);
                 this.writeEmitter.fire(`\x1b[2C`);
-                //this.writeEmitter.fire(`\x1b[${2 + targetColumn}C`);
                 if (targetColumn !== 0) {
                     this.writeEmitter.fire(`\x1b[${targetColumn}C`);
                 }
@@ -1334,11 +1409,6 @@ export class TerminalProvider implements vscode.Pseudoterminal {
         this.lineStartIndexes.splice(newLineIndex, 0, currentLineEnd);
         this.lineLengths.splice(newLineIndex, 0, 0);
 
-        // 调整后续所有行的起始索引（因为插入了一个换行符）
-        // for (let i = newLineIndex + 1; i < this.lineStartIndexes.length; i++) {
-        //     this.lineStartIndexes[i] += 1;
-        // }
-
         // 更新光标位置到新插入的空行
         this.currentLine = newLineIndex;
         this.currentColumn = 0;
@@ -1379,10 +1449,6 @@ export class TerminalProvider implements vscode.Pseudoterminal {
         this.lineLengths.splice(newLineIndex, 0, movedContent.length);
 
         this.renderRemainingLine();
-        // 调整后续行索引（因为插入了一个换行符）
-        // for (let i = newLineIndex + 1; i < this.lineStartIndexes.length; i++) {
-        //     this.lineStartIndexes[i] += 1;
-        // }
 
         // 更新光标位置到新行的行尾
         this.currentLine = newLineIndex;
@@ -1402,9 +1468,7 @@ export class TerminalProvider implements vscode.Pseudoterminal {
         let startLine = this.currentLine;
 
         // 缓存下一行至最后一行的内容
-        //let afterLines: string[] = [];
         for (let i = startLine + 1; i < this.lineStartIndexes.length; i++) {
-            // afterLines.push(this.multiLineBuffer.slice(this.lineStartIndexes[i]));
             if (i < this.lineStartIndexes.length - 1) {
                 lines.push(this.multiLineBuffer.slice(this.lineStartIndexes[i], this.lineStartIndexes[i + 1]));
             } else {
