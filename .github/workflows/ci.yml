@@ -1,0 +1,33 @@
+name: CI
+
+on: [push, pull_request]
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4 # 使用官方Action，您的配置已允许
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4 # 使用官方Action，您的配置已允许
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run linting
+        run: npm run lint # 假设您的package.json中定义了lint脚本
+
+      - name: Run tests with coverage
+        run: npm test -- --coverage # 假设使用Jest等测试框架
+
+      - name: Build project
+        run: npm run build # 编译TypeScript，确保无错误
+
+      # 可选：上传覆盖率报告，这需要您已添加codecov-action到白名单
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v4
