@@ -32,6 +32,9 @@
       {
         "command": "starsfall.disconnectAll",
         "title": "Starsfall: Disconnect All"
+      },{
+        "command": "starsfall.shutdownAll",
+        "title": "Starsfall: Shutdown All"
       },
       {
         "command": "starsfall.focusServersExplorer",

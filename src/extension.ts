@@ -37,8 +37,8 @@ export function activate(context: vscode.ExtensionContext) {
   const editServerCommand = vscode.commands.registerCommand('starsfall.editServer', () => serverManager.editServer());
 
   const removeServerCommand = vscode.commands.registerCommand('starsfall.removeServer', () => serverManager.disconnectServer());
-
   const disconnectAllCommand = vscode.commands.registerCommand('starsfall.disconnectAll', () => serverManager.disconnectAllTerminals());
+  const shutdownAllCommand = vscode.commands.registerCommand('starsfall.shutdownAll', () => serverManager.shutdownAllServers());
 
   const focusServersExplorerCommand = vscode.commands.registerCommand('starsfall.focusServersExplorer', () => {
     vscode.commands.executeCommand('workbench.view.extension.serversExplorer');
@@ -69,6 +69,7 @@ export function activate(context: vscode.ExtensionContext) {
     editServerCommand,
     removeServerCommand,
     disconnectAllCommand,
+    shutdownAllCommand,
     focusServersExplorerCommand,
     uploadFileCommand,
     downloadFileCommand,
