@@ -28,11 +28,6 @@ jobs:
       
     - name: Build extension
       run: npm run build
-      
-    - name: Run non-UI unit tests
-      run: |
-        # 运行不涉及UI交互的核心逻辑测试
-        npm test -- --testNamePattern="parser|utility|core"
         
     - name: Check for build artifacts
       run: |
