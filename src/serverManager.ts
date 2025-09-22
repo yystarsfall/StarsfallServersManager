@@ -104,7 +104,7 @@ export class ServerManager {
         // 关闭终端
         const terminal = this.terminals.get(selectedServerId);
         if (terminal) {
-            terminal.sendText('exit'); // 发送退出命令
+            terminal.sendText('exit',true); // 发送退出命令
             terminal.dispose(); // 关闭终端
         }
         this.terminals.delete(selectedServerId);
@@ -113,7 +113,16 @@ export class ServerManager {
     public disconnectAllTerminals(): void {
         this.fileExplorerManager.disconnectServer('');
         this.terminals.forEach(terminal => {
-            terminal.sendText('exit'); // 发送退出命令
+            terminal.sendText('exit',true); // 发送退出命令
+            terminal.dispose(); // 关闭终端
+        });
+        this.terminals.clear(); // 清空缓存 // 清空文件资源管理器中的服务器列表
+    }
+
+    public shutdownAllServers():void{
+        this.fileExplorerManager.disconnectServer('');
+        this.terminals.forEach(terminal => {
+            terminal.sendText('sudo shutdown -h now',true); // 发送关机命令
             terminal.dispose(); // 关闭终端
         });
         this.terminals.clear(); // 清空缓存 // 清空文件资源管理器中的服务器列表

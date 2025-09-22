@@ -23,6 +23,7 @@ export class TerminalProvider implements vscode.Pseudoterminal {
     private currentColumn: number = 0;        // 当前列号（0-based）
     private lineLengths: number[] = [0];      // 每行的显示长度
     private lineStartIndexes: number[] = [0]; // 每行在缓冲区中的起始索引
+    private lineDisplayWidths: number[][] = [[]]; // 每行的显示宽度数组
     private isInsertMode = false;
     private systemType = ''; // 系统类型
     private terminalHeight: number = 24; //终端高度
@@ -42,6 +43,7 @@ export class TerminalProvider implements vscode.Pseudoterminal {
     ) {
         this.hostname = hostname || this.getHost(); // 如果未提供，则从 connectionString 中提取
         this.systemType = systemType || ''; // 如果未提供，则默认为空字符串
+        this.initWidthTracking(); // 添加这行
     }
 
     open(): void {
@@ -197,17 +199,20 @@ export class TerminalProvider implements vscode.Pseudoterminal {
             // 输出剩余字符
             if (this.currentColumn < this.lineLengths[this.currentLine]) {
                 this.writeEmitter.fire(this.multiLineBuffer.slice(this.lineStartIndexes[this.currentLine] + this.currentColumn, this.lineStartIndexes[this.currentLine + 1]));
-                // 将光标移回原始位置
-                this.writeEmitter.fire(`\x1b[${this.lineLengths[this.currentLine] - this.currentColumn}D`);
+                // // 将光标移回原始位置
+                // this.writeEmitter.fire(`\x1b[${this.lineLengths[this.currentLine] - this.currentColumn}D`);
+                // 将光标移回原始位置，先计算剩余字符的显示宽度
+                const remainingContentWidth = this.getDisplayWidthFrom(this.currentLine, this.currentColumn);
+                this.writeEmitter.fire(`\x1b[${remainingContentWidth}D`);
             }
         } else {
             // 输出剩余字符
             if (this.cursorPosition < this.cmd.length) {
+                // 输出剩余字符
                 this.writeEmitter.fire(this.cmd.slice(this.cursorPosition));
-            }
-            // 将光标移回原始位置
-            if (this.cursorPosition < this.cmd.length) {
-                this.writeEmitter.fire(`\x1b[${this.cmd.length - this.cursorPosition}D`);
+                // 将光标移回原始位置，先计算剩余字符的显示宽度
+                const remainingContentWidth = this.getDisplayWidthFrom(0, this.cursorPosition);
+                this.writeEmitter.fire(`\x1b[${remainingContentWidth}D`);
             }
         }
     }
@@ -281,7 +286,90 @@ export class TerminalProvider implements vscode.Pseudoterminal {
         return false;
     }
 
+    // 初始化方法（在构造函数或reset时调用）
+    private initWidthTracking(): void {
+        this.lineDisplayWidths = [[]];
+    }
+
+    // 在指定位置插入字符并记录显示宽度
+    private insertCharWithWidthTracking(line: number, column: number, char: string): number {
+        const width = this.getCharDisplayWidth(char);
+
+        // 确保行数组存在
+        if (!this.lineDisplayWidths[line]) {
+            this.lineDisplayWidths[line] = [];
+        }
+
+        // 在指定位置插入宽度记录
+        this.lineDisplayWidths[line].splice(column, 0, width);
+
+        return width;
+    }
+
+    // 删除指定位置的字符并返回其显示宽度
+    private deleteCharWithWidthTracking(line: number, column: number): number {
+        if (!this.lineDisplayWidths[line] || column >= this.lineDisplayWidths[line].length) {
+            return 0;
+        }
+
+        const width = this.lineDisplayWidths[line][column];
+        this.lineDisplayWidths[line].splice(column, 1);
+
+        return width;
+    }
+
+    // 获取从指定位置开始的总显示宽度
+    private getDisplayWidthFrom(line: number, column: number): number {
+        if (!this.lineDisplayWidths[line]) return 0;
+
+        let total = 0;
+        for (let i = column; i < this.lineDisplayWidths[line].length; i++) {
+            total += this.lineDisplayWidths[line][i];
+        }
+        return total;
+    }
+
+    // 获取到指定位置为止的总显示宽度
+    private getDisplayWidthTo(line: number, column: number): number {
+        if (!this.lineDisplayWidths[line]) return 0;
+
+        let total = 0;
+        for (let i = 0; i < column; i++) {
+            total += this.lineDisplayWidths[line][i];
+        }
+        return total;
+    }
+
+    // 字符显示宽度检测方法
+    private getCharDisplayWidth(char: string): number {
+        // 中文字符的Unicode范围：基本汉字（0x4E00-0x9FFF）和扩展A（0x3400-0x4DBF）
+        const code = char.charCodeAt(0);
+        return (code >= 0x4E00 && code <= 0x9FFF) || (code >= 0x3400 && code <= 0x4DBF) ? 2 : 1;
+    }
+
+    // 添加一个统一的重置方法
+    private resetTerminalState(): void {
+        this.isEditorMode = false;
+        this.isMultiLine = false;
+        this.multiLineBuffer = '';
+        this.editorBuffer = '';
+        this.cmd = '';
+        this.currentLine = 0;
+        this.currentColumn = 0;
+        this.cursorPosition = 0;
+        this.lineStartIndexes = [0];
+        this.lineLengths = [0];
+        this.initWidthTracking();
+    }
+
     async handleInput(data: string): Promise<void> {
+        console.log(`Received input: ${data}`);
+
+        const code = data.charCodeAt(0);
+        console.log(`Received input (code): ${code}`);
+
+        const hexValue = Array.from(data).map(c => c.charCodeAt(0).toString(16)).join(', ');
+        console.log(`Received input (hex): ${hexValue}`);
         // 如果处于编辑器模式，累积输入以检测退出命令
         if (this.isEditorMode) {
             this.editorBuffer += data;
@@ -301,15 +389,6 @@ export class TerminalProvider implements vscode.Pseudoterminal {
             }
             return;
         }
-
-        console.log(`Received input: ${data}`);
-
-        const code = data.charCodeAt(0);
-        console.log(`Received input (code): ${code}`);
-
-        const hexValue = Array.from(data).map(c => c.charCodeAt(0).toString(16)).join(', ');
-        console.log(`Received input (hex): ${hexValue}`);
-
         // 检测包围式粘贴模式
         if (data.startsWith('\x1b[200~') && data.endsWith('\x1b[201~')) {
             // 提取实际的粘贴内容（去掉开始和结束标记）
@@ -337,8 +416,10 @@ export class TerminalProvider implements vscode.Pseudoterminal {
                 // 初始化行列跟踪系统
                 this.currentLine++; // 第0行是原始命令，第1行是提示符行
                 this.currentColumn = 0; // 逻辑列位置（从0开始，在"> "之后）
+                this.cursorPosition = 0;
                 this.lineStartIndexes[this.currentLine] = this.multiLineBuffer.length;
                 this.lineLengths[this.currentLine] = 0;
+                this.lineDisplayWidths[this.currentLine] = [];
                 // 显示多行提示符
                 this.writeEmitter.fire('\r\n> ');
                 return;
@@ -358,9 +439,11 @@ export class TerminalProvider implements vscode.Pseudoterminal {
                     this.cmd = '';
                     this.currentLine++;
                     this.currentColumn = 0;
+                    this.cursorPosition = 0;
                     this.lineStartIndexes[this.currentLine] = this.multiLineBuffer.length;
 
                     this.lineLengths[this.currentLine] = 0;
+                    this.lineDisplayWidths[this.currentLine] = [];
                     // 显示多行提示符
                     this.writeEmitter.fire('\r\n> ');
                     return;
@@ -393,9 +476,15 @@ export class TerminalProvider implements vscode.Pseudoterminal {
                 } else if (this.currentLine < this.lineLengths.length - 1) {
                     // 如果在行中，则插入
                     this.writeEmitter.fire(data);
+                    // 计算每个字符的显示宽度
+                    for (let i = 0; i < data.length; i++) {
+                        const char = data.charAt(i);
+                        this.insertCharWithWidthTracking(this.currentLine, this.currentColumn + i, char);
+                    }
                     this.multiLineBuffer = this.multiLineBuffer.slice(0, this.lineStartIndexes[this.currentLine] + this.currentColumn) + data + this.multiLineBuffer.slice(this.lineStartIndexes[this.currentLine] + this.currentColumn);
                     this.lineLengths[this.currentLine] += data.length;
                     this.currentColumn += data.length;
+                    this.cursorPosition += data.length;
                     // 后续的每一行的起始位置都要加1
                     for (let i = this.currentLine + 1; i < this.lineStartIndexes.length; i++) {
                         this.lineStartIndexes[i]++;
@@ -405,16 +494,28 @@ export class TerminalProvider implements vscode.Pseudoterminal {
                 } else {
                     if (this.currentColumn === this.getCurrentLineLength()) {
                         this.writeEmitter.fire(data);
+                        // 计算每个字符的显示宽度
+                        for (let i = 0; i < data.length; i++) {
+                            const char = data.charAt(i);
+                            this.insertCharWithWidthTracking(this.currentLine, this.currentColumn + i, char);
+                        }
                         this.multiLineBuffer += data;
                         this.currentColumn += data.length;
+                        this.cursorPosition += data.length;
                         this.lineLengths[this.currentLine] = this.multiLineBuffer.length - this.lineStartIndexes[this.currentLine];
                         return;
                     } else {
                         // 将data 添加到当前行的当前列，且不影响当前列后面的内容
                         this.writeEmitter.fire(data);
+                        // 计算每个字符的显示宽度
+                        for (let i = 0; i < data.length; i++) {
+                            const char = data.charAt(i);
+                            this.insertCharWithWidthTracking(this.currentLine, this.currentColumn + i, char);
+                        }
                         this.multiLineBuffer = this.multiLineBuffer.slice(0, this.lineStartIndexes[this.currentLine] + this.currentColumn) + data + this.multiLineBuffer.slice(this.lineStartIndexes[this.currentLine] + this.currentColumn);
                         this.lineLengths[this.currentLine] += data.length;
                         this.currentColumn += data.length;
+                        this.cursorPosition += data.length;
                         this.renderRemainingLine();
                         return;
                     }
@@ -432,15 +533,7 @@ export class TerminalProvider implements vscode.Pseudoterminal {
                     this.clearMultiLineDisplay();
                 }
                 this.processCommand('Ctrl-C');
-                this.cmd = '';
-                this.multiLineBuffer = '';
-                this.editorBuffer = '';
-                this.isMultiLine = false;
-                this.currentLine = 0;
-                this.currentColumn = 0;
-                this.cursorPosition = 0;
-                this.lineLengths = [0];
-                this.lineStartIndexes = [0];
+                this.resetTerminalState();
                 break;
             case 13: // Enter 键
                 if (this.isMultiLine) {
@@ -451,44 +544,38 @@ export class TerminalProvider implements vscode.Pseudoterminal {
                     this.writeEmitter.fire('\r\n');
                     this.processCommand(this.multiLineBuffer.trim());
                     this.addToHistory(this.multiLineBuffer.trim());
-                    this.isMultiLine = false;
-                    this.multiLineBuffer = '';
-                    this.editorBuffer = '';
-                    // 重置行列位置
-                    this.currentLine = 0;
-                    this.currentColumn = 0;
-                    this.lineStartIndexes = [0];
-                    this.lineLengths = [0];
-                    this.cmd = '';
-                    this.cursorPosition = 0;
                 } else {
                     this.writeEmitter.fire('\r\n');
                     this.processCommand(this.cmd);
                     this.addToHistory(this.cmd);
-                    this.cmd = '';
-                    this.multiLineBuffer = '';
-                    this.editorBuffer = '';
-                    this.isMultiLine = false;
-                    this.currentLine = 0;
-                    this.currentColumn = 0;
-                    this.cursorPosition = 0;
-                    this.lineStartIndexes = [0];
-                    this.lineLengths = [0];
                 }
+                this.resetTerminalState();
                 break;
             case 127: // Backspace 键
                 if (this.isMultiLine) {
                     if (this.multiLineBuffer.length > 0) {
                         // 判断是否在行中
                         if (this.currentColumn > 0 && this.currentColumn < this.getCurrentLineLength()) {
+                            // 获取要删除字符的显示宽度
+                            const charToDelete = this.multiLineBuffer[this.lineStartIndexes[this.currentLine] + this.currentColumn - 1];
+                            const charWidth = this.getCharDisplayWidth(charToDelete);
                             // 如果在行中，删除字符
-                            this.multiLineBuffer = this.multiLineBuffer.slice(0, this.lineStartIndexes[this.currentLine] + this.currentColumn - 1) + this.multiLineBuffer.slice(this.lineStartIndexes[this.currentLine] + this.currentColumn);
+                            // this.multiLineBuffer = this.multiLineBuffer.slice(0, this.lineStartIndexes[this.currentLine] + this.currentColumn - 1) + this.multiLineBuffer.slice(this.lineStartIndexes[this.currentLine] + this.currentColumn);
+                            // 删除字符
+                            this.multiLineBuffer = this.multiLineBuffer.slice(0, this.lineStartIndexes[this.currentLine] + this.currentColumn - 1) +
+                                this.multiLineBuffer.slice(this.lineStartIndexes[this.currentLine] + this.currentColumn);
+
+                            // 更新宽度跟踪
+                            this.deleteCharWithWidthTracking(this.currentLine, this.currentColumn - 1);
                             this.currentColumn--;
                             this.lineLengths[this.currentLine]--;
                             for (let i = this.currentLine + 1; i < this.lineStartIndexes.length; i++) {
                                 this.lineStartIndexes[i]--;
                             }
-                            this.writeEmitter.fire('\b \b');
+                            // this.writeEmitter.fire('\b \b');
+                            // 使用实际显示宽度移动光标并清除
+                            this.writeEmitter.fire(`\x1b[${charWidth}D`); // 向左移动
+                            this.writeEmitter.fire(`\x1b[${charWidth}X`); // 清除字符
                             this.renderRemainingLine();
                         } else if (this.currentColumn === 0 && this.currentLine > 0 && this.lineLengths[this.currentLine] === 0) {
                             // 删除当前空行
@@ -505,39 +592,53 @@ export class TerminalProvider implements vscode.Pseudoterminal {
                             // this.renderRemainingLine();
                             // this.clearNextLineAndReturn();
                         } else {
+                            // 将当前行当前列的前一个字符删除
+                            const charToDelete = this.multiLineBuffer[this.lineStartIndexes[this.currentLine] + this.currentColumn - 1];
+                            const charWidth = this.getCharDisplayWidth(charToDelete);
                             // 将当前行当前列的前一个字符 删除
-                            this.multiLineBuffer = this.multiLineBuffer.slice(0, this.lineStartIndexes[this.currentLine] + this.currentColumn - 1) + this.multiLineBuffer.slice(this.lineStartIndexes[this.currentLine] + this.currentColumn);
+                            this.multiLineBuffer = this.multiLineBuffer.slice(0, this.lineStartIndexes[this.currentLine] + this.currentColumn - 1) +
+                                this.multiLineBuffer.slice(this.lineStartIndexes[this.currentLine] + this.currentColumn);
+
+                            // 更新宽度跟踪
+                            this.deleteCharWithWidthTracking(this.currentLine, this.currentColumn - 1);
                             this.currentColumn--;
                             this.lineLengths[this.currentLine]--;
                             for (let i = this.currentLine + 1; i < this.lineStartIndexes.length; i++) {
                                 this.lineStartIndexes[i]--;
                             }
-                            this.writeEmitter.fire('\b \b');
+                            // this.writeEmitter.fire('\b \b');
+                            // 使用实际显示宽度移动光标并清除
+                            this.writeEmitter.fire(`\x1b[${charWidth}D`);
+                            this.writeEmitter.fire(`\x1b[${charWidth}X`);
                             this.renderRemainingLine();
                         }
 
                     }
                 } else {
                     if (this.cmd.length > 0 && this.cursorPosition > 0) {
+                        // 获取要删除字符的显示宽度
+                        const charToDelete = this.cmd[this.cursorPosition - 1];
+                        const charWidth = this.getCharDisplayWidth(charToDelete);
                         this.cmd = this.cmd.slice(0, this.cursorPosition - 1) + this.cmd.slice(this.cursorPosition);
                         this.multiLineBuffer = this.cmd;
+
+                        // 更新宽度跟踪
+                        this.deleteCharWithWidthTracking(0, this.cursorPosition - 1);
                         this.cursorPosition--;
                         this.currentColumn--;
-                        this.writeEmitter.fire('\b \b');
+                        this.lineLengths[0]--;
+                        // this.writeEmitter.fire('\b \b');
+
+                        // 使用实际显示宽度移动光标并清除
+                        this.writeEmitter.fire(`\x1b[${charWidth}D`);
+                        this.writeEmitter.fire(`\x1b[${charWidth}X`);
                         this.renderRemainingLine(); // 重新渲染剩余内容
                     }
                 }
                 break;
             case 27: // 
                 if (data === '\x1b') { // 退出编辑插入模式
-                    this.isMultiLine = false;
-                    this.multiLineBuffer = '';
-                    this.currentLine = 0;
-                    this.currentColumn = 0;
-                    this.lineStartIndexes = [0];
-                    this.lineLengths = [0];
-                    this.cmd = '';
-                    this.cursorPosition = 0;
+                    this.resetTerminalState();
                 } else if (data === '\x1b[A' || data === '\x1bOA') { // 上键
                     if (this.isMultiLine) {
                         // 多行模式：向上移动一行
@@ -581,9 +682,11 @@ export class TerminalProvider implements vscode.Pseudoterminal {
                         this.handleCrossLineMovement('left');
                     } else {
                         if (this.cursorPosition > 0) {
+                            // 获取前一个字符的显示宽度
+                            const prevCharWidth = this.getCharDisplayWidth(this.cmd[this.cursorPosition - 1]);
                             this.cursorPosition--;
                             this.currentColumn--;
-                            this.writeEmitter.fire('\x1b[D');
+                            this.writeEmitter.fire(`\x1b[${prevCharWidth}D`);
                         }
                     }
                     return;
@@ -592,9 +695,11 @@ export class TerminalProvider implements vscode.Pseudoterminal {
                         this.handleCrossLineMovement('right');
                     } else {
                         if (this.cursorPosition < this.cmd.length) {
+                            // 获取当前字符的显示宽度
+                            const currentCharWidth = this.getCharDisplayWidth(this.cmd[this.cursorPosition]);
                             this.cursorPosition++;
                             this.currentColumn++;
-                            this.writeEmitter.fire('\x1b[C');
+                            this.writeEmitter.fire(`\x1b[${currentCharWidth}C`);
                         }
                     }
                     return;
@@ -604,10 +709,15 @@ export class TerminalProvider implements vscode.Pseudoterminal {
                         const currentLineLength = this.getCurrentLineLength();
                         this.moveToPosition(this.currentLine, currentLineLength);
                     } else {
-                        // 计算需要向右移动的光标位置
-                        const moveRight = this.cmd.length - this.cursorPosition;
-                        if (moveRight > 0) {
-                            this.writeEmitter.fire(`\x1b[${moveRight}C`); // 向右移动光标
+                        // // 计算需要向右移动的光标位置
+                        // const moveRight = this.cmd.length - this.cursorPosition;
+                        // if (moveRight > 0) {
+                        //     this.writeEmitter.fire(`\x1b[${moveRight}C`); // 向右移动光标
+                        // }
+                        // 计算需要向右移动的显示宽度
+                        const displayWidthToMove = this.getDisplayWidthFrom(0, this.cursorPosition);
+                        if (displayWidthToMove > 0) {
+                            this.writeEmitter.fire(`\x1b[${displayWidthToMove}C`);
                         }
                         this.cursorPosition = this.cmd.length;
                         this.currentColumn = this.cmd.length;
@@ -618,10 +728,15 @@ export class TerminalProvider implements vscode.Pseudoterminal {
                         // 使用moveToPosition方法移动到当前行的开头（逻辑位置0）
                         this.moveToPosition(this.currentLine, 0);
                     } else {
-                        // 计算需要向左移动的光标位置
-                        const moveLeft = this.cursorPosition;
-                        if (moveLeft > 0) {
-                            this.writeEmitter.fire(`\x1b[${moveLeft}D`); // 向左移动光标
+                        // // 计算需要向左移动的光标位置
+                        // const moveLeft = this.cursorPosition;
+                        // if (moveLeft > 0) {
+                        //     this.writeEmitter.fire(`\x1b[${moveLeft}D`); // 向左移动光标
+                        // }
+                        // 计算需要向左移动的显示宽度
+                        const displayWidthToMove = this.getDisplayWidthTo(0, this.cursorPosition);
+                        if (displayWidthToMove > 0) {
+                            this.writeEmitter.fire(`\x1b[${displayWidthToMove}D`);
                         }
                         this.cursorPosition = 0;
                         this.currentColumn = 0;
@@ -635,23 +750,48 @@ export class TerminalProvider implements vscode.Pseudoterminal {
                 } else if (data === '\x1b[3~') { // Del 键
                     if (this.isMultiLine) {
                         // 多行模式：删除当前光标位置字符
-                        if (this.currentColumn > 0 && this.currentColumn < this.lineLengths[this.currentLine]) {
-                            this.multiLineBuffer = this.multiLineBuffer.slice(0, this.lineStartIndexes[this.currentLine] + this.currentColumn - 1) + this.multiLineBuffer.slice(this.lineStartIndexes[this.currentLine] + this.currentColumn);
+                        if (this.currentColumn >= 0
+                            && this.currentColumn < this.lineLengths[this.currentLine]
+                            && this.lineLengths[this.currentLine] > 0
+                        ) {
+                            // 删除光标位置的字符的显示宽度
+                            this.deleteCharWithWidthTracking(this.currentLine, this.currentColumn);
+                            this.multiLineBuffer = this.multiLineBuffer.slice(0, this.lineStartIndexes[this.currentLine] + this.currentColumn)
+                                + this.multiLineBuffer.slice(this.lineStartIndexes[this.currentLine] + this.currentColumn + 1);
                             this.writeEmitter.fire('\x1b[P');
                             this.lineLengths[this.currentLine]--;
                             for (let i = this.currentLine + 1; i < this.lineStartIndexes.length; i++) {
                                 this.lineStartIndexes[i]--;
                             }
                             this.renderRemainingLine(); // 重新渲染剩余内容
-                        } else if (this.currentColumn === this.lineLengths[this.currentLine] && this.lineLengths[this.currentLine + 1] === 0) {
-                            // 如果下一行是空行，删除下一行
-                            this.clearNextLineAndReturn();
+                        } else if (this.currentColumn === 0
+                            && this.lineLengths[this.currentLine] === 0
+                            && this.currentLine + 1 <= this.lineLengths.length - 1
+                        ) {
+                            // 删除中间的空行
+                            this.clearCurrentLineAndReturn(false);
+                        } else if (this.currentColumn === this.lineLengths[this.currentLine]
+                            && this.currentColumn > 0
+                            && this.currentLine + 1 <= this.lineLengths.length - 1
+                            && this.lineLengths[this.currentLine + 1] === 0) {
+                            // 当倒数第二行的行尾删除，且最后一行是空行
+                            this.moveToPosition(this.currentLine + 1, this.lineLengths[this.currentLine + 1]);
+                            this.clearCurrentLineAndReturn();
+                            // this.clearNextLineAndReturn();
+                        } else if (this.currentColumn === 0
+                            && this.currentLine === this.lineLengths.length - 1
+                            && this.lineLengths[this.currentLine] === 0
+                        ) {
+                            this.clearCurrentLineAndReturn();
                         }
                     } else {
                         if (this.cmd.length > 0 && this.cursorPosition < this.cmd.length) {
+                            // 删除光标位置的字符的显示宽度
+                            this.deleteCharWithWidthTracking(0, this.cursorPosition);
                             this.cmd = this.cmd.slice(0, this.cursorPosition) + this.cmd.slice(this.cursorPosition + 1);
                             this.multiLineBuffer = this.cmd;
                             this.writeEmitter.fire('\x1b[P');
+                            this.lineLengths[0]--;
                             this.renderRemainingLine(); // 重新渲染剩余内容
                         }
                     }
@@ -668,19 +808,33 @@ export class TerminalProvider implements vscode.Pseudoterminal {
                 if (this.isMultiLine) {
                     // 多行模式：自动补全
                     // 获取当前行，当前列之前的内容
-                    const linePreviousContent = this.multiLineBuffer.slice(this.lineStartIndexes[this.currentLine], this.lineStartIndexes[this.currentLine] + this.currentColumn);
-                    // 获取当前行，当前列的代码补全建议
-                    const linePreviousSuggestions = await this.getTabSuggestions(linePreviousContent);
+                    const linePreviousContent = this.multiLineBuffer.slice(
+                        this.lineStartIndexes[this.currentLine],
+                        this.lineStartIndexes[this.currentLine] + this.currentColumn);
+
+                    // 获取前面行的内容 + 当前行的内容
+                    const tabContents = this.multiLineBuffer.slice(0, this.lineStartIndexes[this.currentLine] + this.currentColumn)
+                    // 使用完整的多行上下文进行分析，但只补全当前行
+                    const linePreviousSuggestions = await this.getTabSuggestions(linePreviousContent, tabContents);
                     if (linePreviousSuggestions.length === 1) {
                         // 如果只有一个建议，自动补全
-                        const fixword = linePreviousSuggestions[0].slice(linePreviousContent.length);
+                        const fixword = linePreviousSuggestions[0].slice(linePreviousContent.length) + ' ';
+                        // 补全的内容要计算显示宽度
+                        for (let i = 0; i < fixword.length; i++) {
+                            const char = fixword.charAt(i);
+                            this.insertCharWithWidthTracking(this.currentLine, this.currentColumn + i, char);
+                        }
                         // 插入当前行，当前列之后的内容，并且不要影响后面的内容
-                        this.multiLineBuffer = this.multiLineBuffer.slice(0, this.lineStartIndexes[this.currentLine] + this.currentColumn) + fixword + this.multiLineBuffer.slice(this.lineStartIndexes[this.currentLine] + this.currentColumn);
+                        this.multiLineBuffer = this.multiLineBuffer.slice(0, this.lineStartIndexes[this.currentLine] + this.currentColumn)
+                            + fixword
+                            + this.multiLineBuffer.slice(this.lineStartIndexes[this.currentLine] + this.currentColumn);
+
 
                         // 更新当前行的长度
                         this.lineLengths[this.currentLine] += fixword.length;
                         // 更新光标位置
                         this.currentColumn += fixword.length;
+                        this.cursorPosition += fixword.length;
                         // 更新光标位置
                         this.writeEmitter.fire(fixword);
 
@@ -706,8 +860,15 @@ export class TerminalProvider implements vscode.Pseudoterminal {
                     if (suggestions.length === 1) {
                         const lastWord = this.cmd.split(/\s+/).pop() || '';
                         const fixword = suggestions[0].slice(lastWord.length);
+                        // 补全的内容要计算显示宽度
+                        for (let i = 0; i < fixword.length; i++) {
+                            const char = fixword.charAt(i);
+                            this.insertCharWithWidthTracking(0, this.cursorPosition + i, char);
+                        }
                         this.cmd += fixword;
                         this.cursorPosition = this.cmd.length;
+                        this.currentColumn = this.cmd.length;
+                        this.lineLengths[0] += fixword.length;
                         this.writeEmitter.fire(fixword);
                     } else if (suggestions.length > 1) {
                         this.writeEmitter.fire('\r\n' + suggestions.join('    ') + '\r\n');
@@ -719,13 +880,7 @@ export class TerminalProvider implements vscode.Pseudoterminal {
                 break;
             case 12: // Ctrl + L 清屏
                 this.writeEmitter.fire('\x1b[2J\x1b[0;0H');
-                this.cmd = '';
-                this.cursorPosition = 0;
-                this.currentColumn = 0;
-                this.currentLine = 0;
-                this.lineStartIndexes = [0];
-                this.lineLengths = [0];
-                this.multiLineBuffer = '';
+                this.resetTerminalState();
                 const clearPrompt = this.getPrompt();  // 使用新的局部变量
                 this.writeEmitter.fire(clearPrompt);
                 return;
@@ -733,11 +888,21 @@ export class TerminalProvider implements vscode.Pseudoterminal {
                 if (this.cursorPosition < this.cmd.length) {
 
                     // 插入模式：在光标位置之前插入字符
-                    this.cmd = this.cmd.slice(0, this.cursorPosition) + data + this.cmd.slice(this.cursorPosition);
+                    this.cmd = this.cmd.slice(0, this.cursorPosition)
+                        + data
+                        + this.cmd.slice(this.cursorPosition);
                     this.multiLineBuffer = this.cmd;
+
+                    // 记录每个字符的显示宽度
+                    for (let i = 0; i < data.length; i++) {
+                        const char = data.charAt(i);
+                        this.insertCharWithWidthTracking(0, this.cursorPosition + i, char);
+                    }
+
                     this.cursorPosition += data.length;
                     this.currentColumn += data.length;
                     this.lineLengths[this.currentLine] += data.length;
+                    this.lineStartIndexes[this.currentLine] = 0;
                     this.writeEmitter.fire(data);
                     this.renderRemainingLine(); // 重新渲染剩余内容
                 } else {
@@ -751,6 +916,13 @@ export class TerminalProvider implements vscode.Pseudoterminal {
 
                     this.cmd += data;
                     this.multiLineBuffer += data;
+
+                    // 记录每个字符的显示宽度
+                    for (let i = 0; i < data.length; i++) {
+                        const char = data.charAt(i);
+                        this.insertCharWithWidthTracking(0, this.cursorPosition + i, char);
+                    }
+
                     this.cursorPosition += data.length;
                     this.currentColumn += data.length;
                     this.lineLengths[this.currentLine] += data.length;
@@ -1038,8 +1210,8 @@ export class TerminalProvider implements vscode.Pseudoterminal {
         // 获取当前目录
 
         const currentDir = ['kali', 'parrot', 'blackarch'].includes(this.systemType)
-        ? this.currentWorkingDirectory
-        : (this.currentWorkingDirectory === '~' ? '~' : path.basename(this.currentWorkingDirectory));
+            ? this.currentWorkingDirectory
+            : (this.currentWorkingDirectory === '~' ? '~' : path.basename(this.currentWorkingDirectory));
 
         switch (this.systemType) {
             // Kali Linux
@@ -1084,8 +1256,8 @@ export class TerminalProvider implements vscode.Pseudoterminal {
 
         // 获取当前目录
         const currentDir = ['kali', 'parrot', 'blackarch'].includes(this.systemType)
-        ? this.currentWorkingDirectory
-        : (this.currentWorkingDirectory === '~' ? '~' : path.basename(this.currentWorkingDirectory));
+            ? this.currentWorkingDirectory
+            : (this.currentWorkingDirectory === '~' ? '~' : path.basename(this.currentWorkingDirectory));
 
         // Kali 格式：└─#
         if (this.systemType === 'kali') {
@@ -1106,16 +1278,22 @@ export class TerminalProvider implements vscode.Pseudoterminal {
         }
     }
 
-    private async getTabSuggestions(input: string): Promise<string[]> {
+    private async getTabSuggestions(input: string, fullContext?: string): Promise<string[]> {
         try {
             if (!this.sshClient) {
                 console.log('SSH client is not connected');
                 return [];
             }
 
-            const words = input.split(/\s+/);
+            // 如果有完整上下文，使用完整上下文进行分析
+            const contextToAnalyze = fullContext || input;
+
+            // 处理多行输入：移除换行符和反斜杠，合并成单行
+            const singleLine = contextToAnalyze.replace(/\\\s*\n/g, ' ').replace(/\n/g, ' ').trim();
+
+            const words = singleLine.split(/\s+/);
             const lastWord = words.pop() || '';
-            const isCommandInput = words.length === 0; // 是否是命令输入（而非路径输入）
+            const isCommandInput = words.length === 0;
 
             // 如果是命令输入，补全命令列表
             if (isCommandInput) {
@@ -1123,9 +1301,7 @@ export class TerminalProvider implements vscode.Pseudoterminal {
                     'ls', 'cd', 'pwd', 'cat', 'mkdir', 'rm', 'cp', 'mv',
                     'sz', 'rz', 'vim', 'nano', 'grep', 'find', 'chmod',
                     'ssh', 'scp', 'tar', 'ps', 'top', 'kill', 'df', 'du',
-                    'systemctl', 'systemctl start', 'systemctl stop',
-                    'systemctl restart', 'systemctl status', 'systemctl enable',
-                    'systemctl disable', 'systemctl list-units'
+                    'systemctl', 'git', 'docker', 'npm', 'yarn', 'pip'
                 ];
                 return commonCommands.filter(cmd => cmd.startsWith(lastWord));
             }
@@ -1204,6 +1380,8 @@ export class TerminalProvider implements vscode.Pseudoterminal {
         // 计算相对移动量
         const lineDiff = targetLine - this.currentLine;
         const columnDiff = targetColumn - this.currentColumn;
+        // 计算目标列 的字符总显示宽度 与 当前列的总字符显示宽度差值
+        const displayWidthDiff = this.getDisplayWidthTo(targetLine, targetColumn) - this.getDisplayWidthTo(this.currentLine, this.currentColumn);
 
         // 使用相对移动命令实现跨行移动
         if (lineDiff !== 0) {
@@ -1234,7 +1412,9 @@ export class TerminalProvider implements vscode.Pseudoterminal {
                     }
                 }
                 // 向右移动
-                this.writeEmitter.fire(`\x1b[${columnDiff}C`);
+                this.writeEmitter.fire(`\x1b[${displayWidthDiff}C`);
+                // // 向右移动
+                // this.writeEmitter.fire(`\x1b[${columnDiff}C`);
             } else {
                 if (lineDiff > 0) {
                     // 行尾向右移动一个字符，则移动到下一行的行首
@@ -1242,7 +1422,9 @@ export class TerminalProvider implements vscode.Pseudoterminal {
                     this.writeEmitter.fire(`\x1b[2C`);
                 } else {
                     // 向左移动
-                    this.writeEmitter.fire(`\x1b[${-columnDiff}D`);
+                    this.writeEmitter.fire(`\x1b[${-displayWidthDiff}D`);
+                    // // 向左移动
+                    // this.writeEmitter.fire(`\x1b[${-columnDiff}D`);
                 }
             }
         } else {
@@ -1251,7 +1433,8 @@ export class TerminalProvider implements vscode.Pseudoterminal {
                 this.writeEmitter.fire(`\r`);
                 this.writeEmitter.fire(`\x1b[2C`);
                 if (targetColumn !== 0) {
-                    this.writeEmitter.fire(`\x1b[${targetColumn}C`);
+                    const displayWidthToMove = this.getDisplayWidthTo(targetLine, targetColumn);
+                    this.writeEmitter.fire(`\x1b[${displayWidthToMove}C`);
                 }
             } else if (lineDiff < 0 && targetLine === 0) {
                 this.writeEmitter.fire('\r');
@@ -1261,20 +1444,23 @@ export class TerminalProvider implements vscode.Pseudoterminal {
                     this.writeEmitter.fire(`\x1b[${promptVisibleLength}C`);
                 }
                 if (targetColumn !== 0) {
-                    this.writeEmitter.fire(`\x1b[${targetColumn}C`);
+                    const displayWidthToMove = this.getDisplayWidthTo(targetLine, targetColumn);
+                    this.writeEmitter.fire(`\x1b[${displayWidthToMove}C`);
                 }
             } else if (lineDiff < 0 && targetLine !== 0) {
                 this.writeEmitter.fire(`\r`);
                 this.writeEmitter.fire(`\x1b[2C`);
                 if (targetColumn !== 0) {
-                    this.writeEmitter.fire(`\x1b[${targetColumn}C`);
+                    const displayWidthToMove = this.getDisplayWidthTo(targetLine, targetColumn);
+                    this.writeEmitter.fire(`\x1b[${displayWidthToMove}C`);
                 }
             } else {
                 // 移动到指定列
                 this.writeEmitter.fire(`\r`);
                 this.writeEmitter.fire(`\x1b[2C`);
                 if (targetColumn !== 0) {
-                    this.writeEmitter.fire(`\x1b[${targetColumn}C`);
+                    const displayWidthToMove = this.getDisplayWidthTo(targetLine, targetColumn);
+                    this.writeEmitter.fire(`\x1b[${displayWidthToMove}C`);
                 }
             }
         }
@@ -1282,6 +1468,7 @@ export class TerminalProvider implements vscode.Pseudoterminal {
         // 更新当前行列位置
         this.currentLine = targetLine;
         this.currentColumn = targetColumn;
+        this.cursorPosition = targetColumn;
     }
 
     /**
@@ -1326,6 +1513,7 @@ export class TerminalProvider implements vscode.Pseudoterminal {
                     const prevLineLength = this.getLineLength(this.currentLine - 1);
                     const targetColumn = Math.min(this.currentColumn, prevLineLength);
                     this.currentColumn = targetColumn;
+                    this.cursorPosition = targetColumn;
                     this.moveToPosition(this.currentLine - 1, targetColumn);
                 }
                 break;
@@ -1336,6 +1524,7 @@ export class TerminalProvider implements vscode.Pseudoterminal {
                     const nextLineLength = this.getLineLength(this.currentLine + 1);
                     const targetColumn = Math.min(this.currentColumn, nextLineLength);
                     this.currentColumn = targetColumn;
+                    this.cursorPosition = targetColumn;
                     this.moveToPosition(this.currentLine + 1, targetColumn);
                 }
                 break;
@@ -1353,6 +1542,7 @@ export class TerminalProvider implements vscode.Pseudoterminal {
         let deleteLine = savedLine + 1;
         this.lineLengths.splice(deleteLine, 1);
         this.lineStartIndexes.splice(deleteLine, 1);
+        this.lineDisplayWidths.splice(deleteLine, 1);
         this.writeEmitter.fire('\x1b[1E\x1b[2K');
         this.currentLine++;
         this.redrawFromLine(deleteLine);
@@ -1362,24 +1552,49 @@ export class TerminalProvider implements vscode.Pseudoterminal {
         this.writeEmitter.fire(`\x1b[2C`);
         this.writeEmitter.fire(`\x1b[${this.lineLengths[this.currentLine]}C`);
         this.currentColumn = this.lineLengths[savedLine];
+        this.cursorPosition = this.lineLengths[savedLine];
         this.moveToPosition(savedLine, savedColumn);
     }
 
     // 清除当前行并返回上一行行尾
-    private clearCurrentLineAndReturn(): void {
+    private clearCurrentLineAndReturn(isRetuanLastLine: boolean = true): void {
         if (!this.isMultiLine) return;
-        if (this.currentLine < 1 || this.currentLine >= this.lineStartIndexes.length) return;
+        if (this.lineLengths.length === 1 || this.currentLine < 1) return;
         let deleteLine = this.currentLine;
+        let cacheEndLine = this.lineLengths.length - 1; //缓存最后一行的行号
         this.lineLengths.splice(deleteLine, 1);
         this.lineStartIndexes.splice(deleteLine, 1);
-        this.redrawFromLine(deleteLine);
-        this.writeEmitter.fire('\x1b[1E\x1b[2K');
-        this.writeEmitter.fire(`\x1b[1A`);
-        this.writeEmitter.fire(`\r`);
-        this.writeEmitter.fire(`\x1b[2C`);
-        this.writeEmitter.fire(`\x1b[${this.lineLengths[this.currentLine]}C`);
-        this.currentColumn = this.lineLengths[deleteLine - 1];
-        this.moveToPosition(deleteLine - 1, this.currentColumn);
+        this.lineDisplayWidths.splice(deleteLine, 1);
+        if (this.currentLine >= 1 && this.currentLine < cacheEndLine) {
+            // 重新渲染删除行之后的行
+            this.redrawFromLine(deleteLine);
+            // 重新渲染之后最后一行会在原来的位置残留，需要清除掉
+            this.writeEmitter.fire('\x1b[1E\x1b[2K');
+            // 清除旧的残留需要将光标移动到最后一行的行尾
+            this.writeEmitter.fire(`\x1b[1A`);
+            this.writeEmitter.fire(`\r`);
+            this.writeEmitter.fire(`\x1b[2C`);
+            //this.writeEmitter.fire(`\x1b[${this.lineLengths[this.currentLine]}C`);
+            // 先移动到最后一行
+            const dispWidth = this.getDisplayWidthTo(this.currentLine, this.currentColumn);
+            this.writeEmitter.fire(`\x1b[${dispWidth}C`);
+            // 在移动到删除行的上一行
+            // this.moveToPosition(deleteLine - 1, this.lineLengths[deleteLine - 1]);
+        } else {
+            // 清除最后一行
+            this.writeEmitter.fire('\x1b[2K');
+        }
+        // 默认移动到删除行的上一行
+        if (isRetuanLastLine) {
+            this.currentColumn = this.lineLengths[deleteLine - 1];
+            this.cursorPosition = this.lineLengths[deleteLine - 1];
+            this.moveToPosition(deleteLine - 1, this.lineLengths[deleteLine - 1]);
+        }
+        else {
+            this.currentColumn = this.lineLengths[deleteLine];
+            this.cursorPosition = this.lineLengths[deleteLine];
+            this.moveToPosition(deleteLine, 0);
+        }
     }
 
     /**
@@ -1409,14 +1624,20 @@ export class TerminalProvider implements vscode.Pseudoterminal {
         this.lineStartIndexes.splice(newLineIndex, 0, currentLineEnd);
         this.lineLengths.splice(newLineIndex, 0, 0);
 
+        // 修复：更新宽度跟踪系统
+        this.lineDisplayWidths.splice(newLineIndex, 0, []); // 插入空行，宽度数组为空
+
         // 更新光标位置到新插入的空行
         this.currentLine = newLineIndex;
         this.currentColumn = 0;
+        this.cursorPosition = 0;
 
         this.writeEmitter.fire('\n');
         // 重绘从当前行开始的所有行
         this.redrawFromLine(newLineIndex);
-
+        // 插入空行后，当前列要重置为0
+        this.currentColumn = 0;
+        this.cursorPosition = 0;
         // 移动光标到正确位置
         this.moveToPosition(newLineIndex, 0);
     }
@@ -1443,16 +1664,29 @@ export class TerminalProvider implements vscode.Pseudoterminal {
         // 更新当前行长度
         this.lineLengths[this.currentLine] = this.currentColumn;
 
+        // 修复：更新当前行的宽度跟踪
+        if (this.lineDisplayWidths[this.currentLine]) {
+            this.lineDisplayWidths[this.currentLine] = this.lineDisplayWidths[this.currentLine].slice(0, this.currentColumn);
+        }
+
         // 插入新行
         const newLineIndex = this.currentLine + 1;
         this.lineStartIndexes.splice(newLineIndex, 0, splitPosition);
         this.lineLengths.splice(newLineIndex, 0, movedContent.length);
+
+        // 修复：更新新行的宽度跟踪
+        const movedWidths: number[] = [];
+        for (let i = 0; i < movedContent.length; i++) {
+            movedWidths.push(this.getCharDisplayWidth(movedContent[i]));
+        }
+        this.lineDisplayWidths.splice(newLineIndex, 0, movedWidths);
 
         this.renderRemainingLine();
 
         // 更新光标位置到新行的行尾
         this.currentLine = newLineIndex;
         this.currentColumn = 0;
+        this.cursorPosition = 0;
 
         this.writeEmitter.fire('\n');
         // 重绘受影响的行
@@ -1466,7 +1700,8 @@ export class TerminalProvider implements vscode.Pseudoterminal {
         if (lines.length === 0) return;
 
         let startLine = this.currentLine;
-
+        let finalPasteLine = startLine + lines.length - 1;
+        let finalPasteCol = lines[lines.length - 1].length - 1;
         // 缓存下一行至最后一行的内容
         for (let i = startLine + 1; i < this.lineStartIndexes.length; i++) {
             if (i < this.lineStartIndexes.length - 1) {
@@ -1481,6 +1716,9 @@ export class TerminalProvider implements vscode.Pseudoterminal {
         const length = this.lineStartIndexes.length;
         this.lineStartIndexes.splice(startLine + 1, length - startLine - 1);
         this.lineLengths.splice(startLine + 1, length - startLine - 1);
+
+        // 修复：同时清除对应的宽度跟踪
+        this.lineDisplayWidths.splice(startLine + 1, length - startLine - 1);
 
         for (let i = 0; i < lines.length; i++) {
             this.currentLine = startLine + i;
@@ -1497,8 +1735,10 @@ export class TerminalProvider implements vscode.Pseudoterminal {
             if (i < lines.length - 1) {
                 this.writeEmitter.fire('\r\n> ');
                 this.currentColumn = 0;
+                this.cursorPosition = 0;
             }
         }
+        this.moveToPosition(finalPasteLine, finalPasteCol);
     }
     // 在当前光标位置插入文本
     private insertTextAtCursor(text: string): void {
@@ -1509,9 +1749,15 @@ export class TerminalProvider implements vscode.Pseudoterminal {
                 text +
                 this.multiLineBuffer.slice(currentPos);
 
-            // 更新当前行长度
+            // 记录每个字符的显示宽度
+            for (let i = 0; i < text.length; i++) {
+                const char = text.charAt(i);
+                this.insertCharWithWidthTracking(this.currentLine, this.currentColumn + i, char);
+            }
+
             this.lineLengths[this.currentLine] += text.length;
             this.currentColumn += text.length;
+            this.cursorPosition += text.length;
 
             // 更新后续行的起始索引
             for (let i = this.currentLine + 1; i < this.lineStartIndexes.length; i++) {
@@ -1522,10 +1768,16 @@ export class TerminalProvider implements vscode.Pseudoterminal {
             this.renderRemainingLine();
         } else {
             this.cmd = this.cmd.slice(0, this.cursorPosition) + text + this.cmd.slice(this.cursorPosition);
-            // 更新当前行的长度
-            this.lineLengths[this.currentLine] += text.length;
-            this.cursorPosition += text.length;
+
+            // 记录每个字符的显示宽度
+            for (let i = 0; i < text.length; i++) {
+                const char = text.charAt(i);
+                this.insertCharWithWidthTracking(0, this.cursorPosition + i, char);
+            }
+
+            this.lineLengths[0] += text.length;
             this.currentColumn += text.length;
+            this.cursorPosition += text.length;
 
             // 单行模式：直接插入
             this.writeEmitter.fire(text);
@@ -1555,6 +1807,7 @@ export class TerminalProvider implements vscode.Pseudoterminal {
             );
             this.writeEmitter.fire(lineContent);
             this.currentColumn = this.lineLengths[i];
+            this.cursorPosition = this.lineLengths[i];
             // 如果不是最后一行，换行
             if (i < this.lineLengths.length - 1) {
                 this.writeEmitter.fire('\r\n');

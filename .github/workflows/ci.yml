@@ -1,0 +1,38 @@
+name: Basic CI Validation
+
+on:
+  push:
+    branches: [dev, main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  basic-validation:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '18.x'
+        cache: 'npm'
+        
+    - name: Install dependencies
+      run: npm ci
+      
+    - name: Type checking
+      run: npx tsc --noEmit
+      
+    - name: Build extension
+      run: npm run build
+        
+    - name: Check for build artifacts
+      run: |
+        # 确认构建产物存在
+        if [ ! -f "dist/extension.js" ]; then
+          echo "Build failed: extension.js not found"
+          exit 1
+        fi
