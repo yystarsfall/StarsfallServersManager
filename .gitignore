@@ -4,6 +4,8 @@ node_modules/
 # Build artifacts
 out/
 dist/
+.vscode-test/
+test-results/
 
 # IDE specific files
 .vscode/*
