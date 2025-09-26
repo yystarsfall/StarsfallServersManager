@@ -84,25 +84,42 @@ export class TerminalProvider implements vscode.Pseudoterminal {
         const baseCommand = lines[0].trim();
         const args = lines.slice(1).filter(line => line.trim() !== '');
 
+        // 解析 sudo 包裹的真实命令，仅用于编辑器判定，不影响实际发送
+        let primaryCommand = baseCommand;
+        if (baseCommand === 'sudo') {
+            let i = 0;
+            while (i < args.length) {
+                const t = args[i];
+                if (t === '--') { i++; break; }
+                if (t === '-u' || t === '--user') { i += 2; continue; }
+                if (t.startsWith('-')) { i++; continue; }
+                break;
+            }
+            if (i < args.length) {
+                primaryCommand = args[i];
+            } else {
+                primaryCommand = '';
+            }
+        }
+
         // 检测 cd 命令并更新缓存目录
         if (baseCommand.startsWith('cd')) {
             this.handleCdCommand(args[0]);
             return;
         }
 
-        if (baseCommand.startsWith('rz')) {
+        if (primaryCommand.startsWith('rz')) {
             this.handleFileUpload(args);
-        } else if (baseCommand.startsWith('sz')) {
+        } else if (primaryCommand.startsWith('sz')) {
             this.handleFileDownload(args);
         } else if (baseCommand.startsWith('Ctrl-C')) {
             // 这里应该发送真正的终止信号
             if (this.sshStream) {
                 this.sshStream.write('\x03'); // 发送Ctrl-C字符
             }
-        } else if (this.isEditorCommand(baseCommand)) {
+        } else if (this.isEditorCommand(primaryCommand)) {
             // vim/vi 等编辑器命令：开启实时模式并直接发送命令
             this.isEditorMode = true;
-            this.editorBuffer = '';
             if (this.sshStream) {
                 this.sshStream.write(fullCommand + '\n');
             }
@@ -376,11 +393,7 @@ export class TerminalProvider implements vscode.Pseudoterminal {
 
             // 检测 vim/vi 退出命令
             if (this.detectEditorExitCommand()) {
-                this.isEditorMode = false;
-                this.editorBuffer = '';
-                // 可选：清空命令行缓冲区
-                this.cmd = '';
-                this.multiLineBuffer = '';
+                this.resetTerminalState();
             }
 
             // 实时转发所有输入到 SSH
@@ -549,7 +562,8 @@ export class TerminalProvider implements vscode.Pseudoterminal {
                     this.processCommand(this.cmd);
                     this.addToHistory(this.cmd);
                 }
-                this.resetTerminalState();
+                if (!this.isEditorMode)
+                    this.resetTerminalState();
                 break;
             case 127: // Backspace 键
                 if (this.isMultiLine) {
@@ -954,8 +968,15 @@ export class TerminalProvider implements vscode.Pseudoterminal {
                     this.sshStream = stream;
                     stream.on('data', (data: Buffer) => {
                         const dataStr = data.toString();
+
+                        // 进入/退出备用屏缓冲（编辑器/分页器常用）
+                        if (dataStr.includes('\x1b[?1049h')) this.isEditorMode = true;
+                        if (dataStr.includes('\x1b[?1049l')) this.isEditorMode = false;
+
                         this.writeEmitter.fire(dataStr);
                     }).on('close', () => {
+                        // 会话关闭时复位，避免残留状态影响下一次会话
+                        this.resetTerminalState();
                         this.writeEmitter.fire('\r\nConnection closed\r\n');
                         this.close();
                     });
