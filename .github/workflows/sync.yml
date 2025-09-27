@@ -1,0 +1,79 @@
+name: Sync to Other Repositories
+
+on:
+  push:
+    branches: [main]  # 推送main分支时触发
+  pull_request:
+    branches: [main]
+    types: [closed]   # PR关闭时触发（包括合并）
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # 克隆完整的提交历史
+      
+      - name: Configure Git user
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+      
+      # 检查PR是否被合并（如果是PR触发的运行）
+      - name: Check if PR was merged
+        id: check_merge
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            if [ "${{ github.event.pull_request.merged }}" = "true" ]; then
+              echo "PR was merged"
+              echo "merged=true" >> $GITHUB_OUTPUT
+            else
+              echo "PR was closed without merging, skipping sync"
+              echo "merged=false" >> $GITHUB_OUTPUT
+            fi
+          else
+            # 非PR触发的运行，默认需要同步
+            echo "merged=true" >> $GITHUB_OUTPUT
+          fi
+      
+      # 同步到Gitee - 添加错误处理
+      - name: Sync to Gitee
+        if: steps.check_merge.outputs.merged == 'true'
+        env:
+          GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
+        continue-on-error: true
+        run: |
+          # 检查Gitee凭证是否配置
+          if [ -z "${{ secrets.GITEE_USERNAME }}" ] || [ -z "${{ secrets.GITEE_TOKEN }}" ]; then
+            echo "Gitee credentials not configured, skipping Gitee sync"
+            exit 0
+          fi
+          
+          # 添加Gitee远程仓库
+          git remote add gitee https://${{ secrets.GITEE_USERNAME }}:${{ secrets.GITEE_TOKEN }}@gitee.com/${{ secrets.GITEE_USERNAME }}/starsfall-servers-manager.git
+          # 推送到Gitee main分支
+          git push --force gitee main || echo "Warning: Gitee sync failed, continuing with other tasks"
+          # 推送tags到Gitee
+          git push --tags gitee || echo "Warning: Gitee tag sync failed"
+      
+      # 同步到JihuLab - 添加错误处理
+      - name: Sync to JihuLab
+        if: steps.check_merge.outputs.merged == 'true'
+        env:
+          JIHULAB_TOKEN: ${{ secrets.JIHULAB_TOKEN }}
+        continue-on-error: true
+        run: |
+          # 检查JihuLab凭证是否配置
+          if [ -z "${{ secrets.JIHULAB_USERNAME }}" ] || [ -z "${{ secrets.JIHULAB_TOKEN }}" ]; then
+            echo "JihuLab credentials not configured, skipping JihuLab sync"
+            exit 0
+          fi
+          
+          # 添加JihuLab远程仓库
+          git remote add jihulab https://${{ secrets.JIHULAB_USERNAME }}:${{ secrets.JIHULAB_TOKEN }}@jihulab.com/${{ secrets.JIHULAB_USERNAME }}/starsfall-servers-manager.git
+          # 推送到JihuLab main分支
+          git push --force jihulab main || echo "Warning: JihuLab sync failed, continuing with other tasks"
+          # 推送tags到JihuLab
+          git push --tags jihulab || echo "Warning: JihuLab tag sync failed"
