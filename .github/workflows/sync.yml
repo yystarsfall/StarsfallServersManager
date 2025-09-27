@@ -52,7 +52,7 @@ jobs:
           fi
           
           # 添加Gitee远程仓库
-          git remote add gitee https://${{ secrets.GITEE_USERNAME }}:${{ secrets.GITEE_TOKEN }}@gitee.com/${{ secrets.GITEE_USERNAME }}/starsfall-servers-manager.git
+          git remote add gitee https://${{ secrets.GITEE_USERNAME }}:${{ secrets.GITEE_TOKEN }}@gitee.com/${{ secrets.GITEE_USERNAME }}/StarsfallServersManager.git
           # 推送到Gitee main分支
           git push --force gitee main || echo "Warning: Gitee sync failed, continuing with other tasks"
           # 推送tags到Gitee
@@ -72,7 +72,7 @@ jobs:
           fi
           
           # 添加JihuLab远程仓库
-          git remote add jihulab https://${{ secrets.JIHULAB_USERNAME }}:${{ secrets.JIHULAB_TOKEN }}@jihulab.com/${{ secrets.JIHULAB_USERNAME }}/starsfall-servers-manager.git
+          git remote add jihulab https://${{ secrets.JIHULAB_USERNAME }}:${{ secrets.JIHULAB_TOKEN }}@jihulab.com/${{ secrets.JIHULAB_USERNAME }}/StarsfallServersManager.git
           # 推送到JihuLab main分支
           git push --force jihulab main || echo "Warning: JihuLab sync failed, continuing with other tasks"
           # 推送tags到JihuLab
