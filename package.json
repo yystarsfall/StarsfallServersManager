@@ -90,7 +90,10 @@
     "watch": "webpack --watch",
     "compile": "tsc -p .",
     "test": "npm run compile && node ./dist/test/runTest.js",
-    "test:report": "cross-env MOCHA_REPORTER=mocha-junit-reporter MOCHA_REPORTER_OPTIONS=\"{\\\"mochaFile\\\":\\\"test-results/junit.xml\\\"}\" npm run test"
+    "test:report": "cross-env MOCHA_REPORTER=mocha-junit-reporter MOCHA_REPORTER_OPTIONS=\"{\\\"mochaFile\\\":\\\"test-results/junit.xml\\\"}\" npm run test",
+    "install:cn": "npm install --registry=https://registry.npmmirror.com --no-package-lock",
+    "install:official": "npm install --registry=https://registry.npmjs.org",
+    "postinstall": "node -e \"if (process.env.CI) { console.log('Running in CI environment, using official registry'); } else { console.log('\\n\\x1b[33m建议国内用户使用 \\x1b[1mnpm run install:cn\\x1b[0m\\x1b[33m 命令以提高安装速度\\x1b[0m\\n'); }\""
   },
   "devDependencies": {
     "@types/chai": "^5.2.2",

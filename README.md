@@ -17,6 +17,20 @@ Starsfall Servers Manager 是一个强大的 VS Code 扩展，专为简化多个
 
 ## 安装指南
 
+### 快速安装选项
+
+为了提升不同地区用户的安装体验，我们提供了以下安装命令选项：
+
+``` bash
+# 国内用户推荐（使用国内镜像源加速）
+npm run install:cn
+
+# 使用官方源（适合国际用户或需要严格版本控制的场景）
+npm run install:official
+```
+
+> CI/CD 流程会自动使用官方源，确保构建的一致性和可靠性。
+
 ### 从 VSIX 文件安装
 
 1. **获取 VSIX 文件**:
@@ -25,10 +39,9 @@ Starsfall Servers Manager 是一个强大的 VS Code 扩展，专为简化多个
 git clone https://github.com/yystarsfall/StarsfallServersManager.git
 cd StarsfallServersManager
 # 依赖说明
-# 项目使用 `webpack` 进行打包，确保已安装 `webpack` 和 `webpack-cli`：
-npm install webpack webpack-cli --save-dev
+# 项目使用 `webpack` 进行打包，这些依赖已包含在项目的 package.json 中
 # 安装依赖并打包
-npm install
+npm run install:official  # 或使用 npm run install:cn 加速
 npm run build
 npm install -g @vscode/vsce  # 如果尚未安装vsce
 vsce package
@@ -115,7 +128,11 @@ vsce package
 ### 构建项目
 1. 安装依赖：
 ```bash
-npm install
+# 国内开发者推荐使用
+npm run install:cn
+
+# 或使用官方源
+npm run install:official
 ```
 2. 构建项目（使用 webpack）：
 ```bash
@@ -134,10 +151,9 @@ vsce package
 
 
 ### 依赖说明
-- 项目使用 `webpack` 进行打包，确保已安装 `webpack` 和 `webpack-cli`：
-```bash
-npm install webpack webpack-cli --save-dev
-```
+- 项目使用 `webpack` 进行打包，这些依赖已包含在项目的 package.json 中
+- 执行 `npm run install:cn` 或 `npm run install:official` 命令时会自动安装所有依赖，包括 webpack 和 webpack-cli
+- 如果遇到打包相关的错误，可以通过 `npm ls webpack webpack-cli` 命令检查这些依赖是否已成功安装
 
 ## 注意事项
 1. 确保服务器地址和端口正确，且网络连接正常。
