@@ -1013,6 +1013,25 @@ export class TerminalProvider implements vscode.Pseudoterminal {
                 remotePath = `./${path.basename(localFilePath)}`;
             }
 
+            // 处理相对路径
+            if (remotePath.startsWith('./') || remotePath.startsWith('../')) {
+                let baseDir = this.currentWorkingDirectory;
+                // 如果当前目录是 ~，获取实际的家目录路径
+                if (baseDir === '~') {
+                    baseDir = await this.getHomeDirectory();
+                }
+                // 拼接路径
+                remotePath = path.posix.resolve(baseDir, remotePath);
+            }
+
+            // 获取文件大小用于显示进度条
+            const fileStats = fs.statSync(localFilePath);
+            const fileSize = fileStats.size;
+            let transferredBytes = 0;
+            let lastPercentage = -1;
+
+            this.writeEmitter.fire(`Starting upload to ${remotePath} (${this.formatFileSize(fileSize)})\r\n`);
+
             const conn = new Client();
             await new Promise((resolve, reject) => {
                 conn.on('ready', () => {
@@ -1026,27 +1045,55 @@ export class TerminalProvider implements vscode.Pseudoterminal {
                         const readStream = fs.createReadStream(localFilePath);
                         const writeStream = sftp.createWriteStream(remotePath);
 
-                        readStream.pipe(writeStream);
+                        // 监听数据传输进度
+                        readStream.on('data', (chunk: Buffer) => {
+                            transferredBytes += chunk.length;
+                            const percentage = Math.floor((transferredBytes / fileSize) * 100);
+                            
+                            // 每1%更新一次进度条，避免过于频繁的更新
+                            if (percentage !== lastPercentage) {
+                                lastPercentage = percentage;
+                                this.writeEmitter.fire(`\r${this.createProgressBar(percentage)} ${percentage}% (${this.formatFileSize(transferredBytes)}/${this.formatFileSize(fileSize)})`);
+                            }
+                        });
 
-                        writeStream
+                        // 添加完成标志，确保只执行一次完成逻辑
+                        let isCompleted = false;
+
+                        readStream.pipe(writeStream)
                             .on('finish', async () => {
-                                this.writeEmitter.fire(`File uploaded: ${remotePath}\r\n`);
-                                let prompt = this.getPrompt();
-                                this.writeEmitter.fire(prompt);
-                                resolve(true);
+                                if (!isCompleted) {
+                                    isCompleted = true;
+                                    this.writeEmitter.fire(`\r\nFile uploaded: ${remotePath}\r\n`);
+                                    let prompt = this.getPrompt();
+                                    this.writeEmitter.fire(prompt);
+                                    resolve(true);
+                                }
                             })
                             .on('end', async () => {
-                                this.writeEmitter.fire(`File uploaded: ${remotePath}\r\n`);
-                                let prompt = this.getPrompt();
-                                this.writeEmitter.fire(prompt);
-                                resolve(true);
+                                if (!isCompleted) {
+                                    isCompleted = true;
+                                    this.writeEmitter.fire(`\r\nFile uploaded: ${remotePath}\r\n`);
+                                    let prompt = this.getPrompt();
+                                    this.writeEmitter.fire(prompt);
+                                    resolve(true);
+                                }
                             })
                             .on('close', async () => {
-                                resolve(true);
+                                if (!isCompleted) {
+                                    isCompleted = true;
+                                    this.writeEmitter.fire(`\r\nFile uploaded: ${remotePath}\r\n`);
+                                    let prompt = this.getPrompt();
+                                    this.writeEmitter.fire(prompt);
+                                    resolve(true);
+                                }
                             })
                             .on('error', (err: Error) => {
-                                this.writeEmitter.fire(`Upload failed: ${err.message}\r\n`);
-                                reject(err);
+                                if (!isCompleted) {
+                                    isCompleted = true;
+                                    this.writeEmitter.fire(`\r\nUpload failed: ${err.message}\r\n`);
+                                    reject(err);
+                                }
                             });
                     });
                 }).on('error', (err) => {
@@ -1062,6 +1109,27 @@ export class TerminalProvider implements vscode.Pseudoterminal {
         } catch (error) {
             this.writeEmitter.fire(`Upload failed: ${error instanceof Error ? error.message : String(error)}\r\n`);
         }
+    }
+
+    // 创建进度条
+    private createProgressBar(percentage: number): string {
+        const barLength = 50;
+        const filledLength = Math.floor((percentage / 100) * barLength);
+        const emptyLength = barLength - filledLength;
+        
+        // 使用 ANSI 颜色代码使进度条更加美观
+        return `\x1b[32m[${'█'.repeat(filledLength)}${' '.repeat(emptyLength)}]\x1b[0m`;
+    }
+
+    // 格式化文件大小显示
+    private formatFileSize(bytes: number): string {
+        if (bytes === 0) return '0 Bytes';
+        
+        const k = 1024;
+        const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+        const i = Math.floor(Math.log(bytes) / Math.log(k));
+        
+        return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
     }
 
     public async handleFileDownload(args: string[] = []) {
@@ -1112,29 +1180,71 @@ export class TerminalProvider implements vscode.Pseudoterminal {
                             return;
                         }
 
-                        const readStream = sftp.createReadStream(remotePath);
-                        const writeStream = fs.createWriteStream(localPath);
+                        // 获取远程文件大小用于显示进度条
+                        sftp.stat(remotePath, (statErr, stats) => {
+                            if (statErr) {
+                                this.writeEmitter.fire(`Failed to get file size: ${statErr.message}\r\n`);
+                                reject(statErr);
+                                return;
+                            }
 
-                        readStream.pipe(writeStream)
-                            .on('finish', async () => {
-                                this.writeEmitter.fire(`File downloaded: ${localPath}\r\n`);
-                                let prompt = this.getPrompt();
-                                this.writeEmitter.fire(prompt);
-                                resolve(true);
-                            })
-                            .on('end', async () => {
-                                this.writeEmitter.fire(`File downloaded: ${remotePath}\r\n`);
-                                let prompt = this.getPrompt();
-                                this.writeEmitter.fire(prompt);
-                                resolve(true);
-                            })
-                            .on('close', async () => {
-                                resolve(true);
-                            })
-                            .on('error', (err) => {
-                                this.writeEmitter.fire(`Download failed: ${err.message}\r\n`);
-                                reject(err);
+                            const fileSize = stats.size;
+                            let transferredBytes = 0;
+                            let lastPercentage = -1;
+
+                            this.writeEmitter.fire(`Starting download from ${remotePath} (${this.formatFileSize(fileSize)})\r\n`);
+
+                            const readStream = sftp.createReadStream(remotePath);
+                            const writeStream = fs.createWriteStream(localPath);
+                            // 添加完成标志，确保只执行一次完成逻辑
+                            let isCompleted = false;
+
+                            // 监听数据传输进度
+                            readStream.on('data', (chunk: Buffer) => {
+                                transferredBytes += chunk.length;
+                                const percentage = Math.floor((transferredBytes / fileSize) * 100);
+                                
+                                // 每1%更新一次进度条，避免过于频繁的更新
+                                if (percentage !== lastPercentage) {
+                                    lastPercentage = percentage;
+                                    this.writeEmitter.fire(`\r${this.createProgressBar(percentage)} ${percentage}% (${this.formatFileSize(transferredBytes)}/${this.formatFileSize(fileSize)})`);
+                                }
                             });
+
+                            readStream.pipe(writeStream)
+                                .on('finish', async () => {
+                                    if (!isCompleted) {
+                                        isCompleted = true;
+                                        this.writeEmitter.fire(`\r\nFile downloaded: ${localPath}\r\n`);
+                                        let prompt = this.getPrompt();
+                                        this.writeEmitter.fire(prompt);
+                                        resolve(true);
+                                    }
+                                })
+                                .on('end', async () => {
+                                    if (!isCompleted) {
+                                        isCompleted = true;
+                                        this.writeEmitter.fire(`\r\nFile downloaded: ${remotePath}\r\n`);
+                                        let prompt = this.getPrompt();
+                                        this.writeEmitter.fire(prompt);
+                                        resolve(true);
+                                    }
+                                })
+                                .on('close', async () => {
+                                    if (!isCompleted) {
+                                        isCompleted = true;
+                                        this.writeEmitter.fire(`\r\nFile downloaded: ${remotePath}\r\n`);
+                                        let prompt = this.getPrompt();
+                                        this.writeEmitter.fire(prompt);
+                                        resolve(true);
+                                    }
+                                })
+                                .on('error', (err) => {
+                                    this.writeEmitter.fire('\r                                                                                \r');
+                                    this.writeEmitter.fire(`Download failed: ${err.message}\r\n`);
+                                    reject(err);
+                                });
+                        });
                     });
                 }).on('error', (err) => {
                     this.writeEmitter.fire(`SSH Error: ${err.message}\r\n`);
