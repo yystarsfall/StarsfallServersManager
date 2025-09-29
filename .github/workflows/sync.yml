@@ -1,8 +1,8 @@
-name: Sync to Other Repositories
+name: Branch Lifecycle Management
 
 on:
   push:
-    branches: [main]  # 推送main分支时触发
+    branches: [main, 'feat/**', 'fix/**']  # 监听main、feat/*和fix/*分支的推送
   pull_request:
     branches: [main]
     types: [closed]   # PR关闭时触发（包括合并）
@@ -21,6 +21,18 @@ jobs:
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
       
+      # 提取源分支信息
+      - name: Extract source branch
+        id: extract_branch
+        run: |
+          if [ "${{ github.event_name }}" = "push" ]; then
+            # 推送事件时，直接获取分支名
+            echo "source_branch=${GITHUB_REF#refs/heads/}" >> $GITHUB_OUTPUT
+          else
+            # PR事件时，获取PR源分支
+            echo "source_branch=${{ github.event.pull_request.head.ref }}" >> $GITHUB_OUTPUT
+          fi
+      
       # 检查PR是否被合并（如果是PR触发的运行）
       - name: Check if PR was merged
         id: check_merge
@@ -38,7 +50,7 @@ jobs:
             echo "merged=true" >> $GITHUB_OUTPUT
           fi
       
-      # 同步到Gitee - 添加错误处理
+      # 同步到Gitee - 添加错误处理和智能分支推送
       - name: Sync to Gitee
         if: steps.check_merge.outputs.merged == 'true'
         env:
@@ -53,12 +65,24 @@ jobs:
           
           # 添加Gitee远程仓库
           git remote add gitee https://${{ secrets.GITEE_USERNAME }}:${{ secrets.GITEE_TOKEN }}@gitee.com/${{ secrets.GITEE_USERNAME }}/StarsfallServersManager.git
-          # 推送到Gitee main分支
-          git push --force gitee main || echo "Warning: Gitee sync failed, continuing with other tasks"
+          
+          # 智能分支推送策略
+          SOURCE_BRANCH=${{ steps.extract_branch.outputs.source_branch }}
+          echo "Syncing branch: $SOURCE_BRANCH to Gitee"
+          
+          # 根据分支类型选择推送策略
+          if [ "$SOURCE_BRANCH" = "main" ]; then
+            # main分支使用强制推送
+            git push --force gitee main || echo "Warning: Gitee main sync failed, continuing with other tasks"
+          elif [[ $SOURCE_BRANCH == feat/* || $SOURCE_BRANCH == fix/* ]]; then
+            # feat/fix分支使用正常推送
+            git push gitee "$SOURCE_BRANCH" || echo "Warning: Gitee $SOURCE_BRANCH sync failed, continuing with other tasks"
+          fi
+          
           # 推送tags到Gitee
           git push --tags gitee || echo "Warning: Gitee tag sync failed"
       
-      # 同步到JihuLab - 添加错误处理
+      # 同步到JihuLab - 添加错误处理和智能分支推送
       - name: Sync to JihuLab
         if: steps.check_merge.outputs.merged == 'true'
         env:
@@ -73,7 +97,57 @@ jobs:
           
           # 添加JihuLab远程仓库
           git remote add jihulab https://${{ secrets.JIHULAB_USERNAME }}:${{ secrets.JIHULAB_TOKEN }}@jihulab.com/${{ secrets.JIHULAB_USERNAME }}/StarsfallServersManager.git
-          # 推送到JihuLab main分支
-          git push --force jihulab main || echo "Warning: JihuLab sync failed, continuing with other tasks"
+          
+          # 智能分支推送策略
+          SOURCE_BRANCH=${{ steps.extract_branch.outputs.source_branch }}
+          echo "Syncing branch: $SOURCE_BRANCH to JihuLab"
+          
+          # 根据分支类型选择推送策略
+          if [ "$SOURCE_BRANCH" = "main" ]; then
+            # main分支使用强制推送
+            git push --force jihulab main || echo "Warning: JihuLab main sync failed, continuing with other tasks"
+          elif [[ $SOURCE_BRANCH == feat/* || $SOURCE_BRANCH == fix/* ]]; then
+            # feat/fix分支使用正常推送
+            git push jihulab "$SOURCE_BRANCH" || echo "Warning: JihuLab $SOURCE_BRANCH sync failed, continuing with other tasks"
+          fi
+          
           # 推送tags到JihuLab
           git push --tags jihulab || echo "Warning: JihuLab tag sync failed"
+      
+      # 自动删除已合并的feat/fix分支 - 仅在PR合并时触发
+      - name: Auto-delete merged feat/fix branches
+        if: github.event_name == 'pull_request' && github.event.pull_request.merged == true
+        run: |
+          # 获取PR源分支名
+          SOURCE_BRANCH=${{ github.event.pull_request.head.ref }}
+          
+          # 检查是否为feat/或fix/分支
+          if [[ $SOURCE_BRANCH == feat/* || $SOURCE_BRANCH == fix/* ]]; then
+            echo "Attempting to delete merged branch: $SOURCE_BRANCH"
+            
+            # 删除GitHub上的分支
+            echo "Deleting branch from GitHub"
+            curl -X DELETE -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+              https://api.github.com/repos/${{ github.repository }}/git/refs/heads/$SOURCE_BRANCH || \
+              echo "Warning: Failed to delete $SOURCE_BRANCH from GitHub"
+            
+            # 删除Gitee上的分支（如果配置了Gitee凭证）
+            if [ -n "${{ secrets.GITEE_USERNAME }}" ] && [ -n "${{ secrets.GITEE_TOKEN }}" ]; then
+              echo "Deleting branch from Gitee"
+              curl -X DELETE -u "${{ secrets.GITEE_USERNAME }}:${{ secrets.GITEE_TOKEN }}" \
+                https://gitee.com/api/v5/repos/${{ secrets.GITEE_USERNAME }}/StarsfallServersManager/git/refs/heads/$SOURCE_BRANCH || \
+                echo "Warning: Failed to delete $SOURCE_BRANCH from Gitee"
+            fi
+            
+            # 删除JihuLab上的分支（如果配置了JihuLab凭证）
+            if [ -n "${{ secrets.JIHULAB_USERNAME }}" ] && [ -n "${{ secrets.JIHULAB_TOKEN }}" ]; then
+              echo "Deleting branch from JihuLab"
+              curl -X DELETE -u "${{ secrets.JIHULAB_USERNAME }}:${{ secrets.JIHULAB_TOKEN }}" \
+                https://jihulab.com/api/v4/projects/${{ secrets.JIHULAB_USERNAME }}%2FStarsfallServersManager/repository/branches/$SOURCE_BRANCH || \
+                echo "Warning: Failed to delete $SOURCE_BRANCH from JihuLab"
+            fi
+            
+            echo "Auto-delete process completed for branch: $SOURCE_BRANCH"
+          else
+            echo "Branch $SOURCE_BRANCH is not a feat/fix branch, skipping auto-delete"
+          fi
