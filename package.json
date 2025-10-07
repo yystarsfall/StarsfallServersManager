@@ -2,7 +2,7 @@
   "name": "starsfall-servers-manager",
   "displayName": "Starsfall Servers Manager",
   "description": "A VS Code extension to manage multiple Linux servers.",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "publisher": "starsfall",
   "repository": {
     "type": "git",
@@ -63,8 +63,28 @@
         "command": "starsfall.openFile",
         "title": "Starsfall: Open File",
         "when": "resourceLangId == 'plaintext'"
+      },
+      {
+        "command": "starsfall.duplicateTerminal",
+        "title": "Starsfall: Duplicate Current Terminal"
       }
     ],
+    "keybindings": [
+      {
+        "command": "starsfall.duplicateTerminal",
+        "key": "ctrl+shift+d",
+        "mac": "cmd+shift+d",
+        "when": "terminalFocus"
+      }
+    ],
+    "menus": {
+      "terminal/context": [
+        {
+          "command": "starsfall.duplicateTerminal",
+          "group": "navigation@1"
+        }
+      ]
+    },
     "viewsContainers": {
       "activitybar": [
         {
@@ -84,6 +104,9 @@
       ]
     }
   },
+  "activationEvents": [
+    "onFileSystem:ssh"
+  ],
   "scripts": {
     "vscode:prepublish": "npm run build",
     "build": "webpack",

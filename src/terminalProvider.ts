@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import { Client } from 'ssh2';
 import * as fs from 'fs';
 import * as path from 'path';
+import { FileExplorerManager } from './fileExplorerManager';
 
 export class TerminalProvider implements vscode.Pseudoterminal {
     private writeEmitter = new vscode.EventEmitter<string>();
@@ -30,6 +31,7 @@ export class TerminalProvider implements vscode.Pseudoterminal {
     private terminalWidth: number = 80;  //终端宽度
     private currentWorkingDirectory: string = '~';
     private lastWorkingDirectory: string = '~';
+    private fileExplorerManager: FileExplorerManager;
 
     // 实现 Pseudoterminal 接口
     onDidWrite: vscode.Event<string> = this.writeEmitter.event;
@@ -39,11 +41,14 @@ export class TerminalProvider implements vscode.Pseudoterminal {
         private connectionString: string,
         private privateKeyPath?: string,
         hostname?: string,
-        systemType?: string// 新增参数
+        systemType?: string, // 新增参数
+        fileExplorerManager?: FileExplorerManager
     ) {
         this.hostname = hostname || this.getHost(); // 如果未提供，则从 connectionString 中提取
         this.systemType = systemType || ''; // 如果未提供，则默认为空字符串
         this.initWidthTracking(); // 添加这行
+        // 如果没有传入fileExplorerManager，则使用getInstance()作为备选
+        this.fileExplorerManager = fileExplorerManager || FileExplorerManager.getInstance();
     }
 
     open(): void {
@@ -102,6 +107,9 @@ export class TerminalProvider implements vscode.Pseudoterminal {
             }
         }
 
+        // 检测是否为文件操作命令
+        const isFileOperationCommand = this.isFileOperationCommand(primaryCommand);
+
         // 检测 cd 命令并更新缓存目录
         if (baseCommand.startsWith('cd')) {
             this.handleCdCommand(args[0]);
@@ -127,6 +135,19 @@ export class TerminalProvider implements vscode.Pseudoterminal {
             // 对于其他命令，通过SSH连接发送
             if (this.sshStream) {
                 this.sshStream.write(fullCommand + '\n');
+
+                // 如果是文件操作命令，在命令执行后触发文件树刷新
+                if (isFileOperationCommand) {
+                    // 解析命令参数中的路径
+                    const paths = this.extractPathsFromCommand(primaryCommand, args);
+
+                    // 增加延迟时间，确保命令有足够时间执行完成
+                    const delayTime = ['mkdir', 'touch', 'cp', 'mv'].includes(primaryCommand) ? 1000 : 500;
+                    setTimeout(() => {
+                        // 刷新相关路径和当前工作目录
+                        this.refreshFileExplorer(paths);
+                    }, delayTime);
+                }
             } else {
                 this.writeEmitter.fire('\r\nSSH connection is not established.\r\n');
             }
@@ -273,6 +294,146 @@ export class TerminalProvider implements vscode.Pseudoterminal {
     }
 
     // 检测编辑器退出命令的方法
+    // 检测是否为文件操作命令
+    private isFileOperationCommand(command: string): boolean {
+        // 常见的文件操作命令列表
+        const fileCommands = [
+            'touch', 'mkdir', 'rm', 'rmdir', 'mv', 'cp', 'ln',
+            'vim', 'vi', 'nano', 'emacs', 'micro', 'neovim', 'nvim',
+            'echo', 'cat', 'dd', 'tee', 'truncate',
+            'find', 'grep', 'sed', 'awk',
+            'tar', 'zip', 'unzip', 'gzip', 'gunzip',
+            'chmod', 'chown', 'chgrp',
+            'rz'  // 添加rz命令到文件操作命令列表
+        ];
+
+        return fileCommands.includes(command);
+    }
+
+    // 从命令参数中提取路径
+    private extractPathsFromCommand(command: string, args: string[]): string[] {
+        const paths: string[] = [];
+
+        // 跳过选项参数，提取实际的路径参数
+        for (let i = 0; i < args.length; i++) {
+            const arg = args[i];
+
+            // 跳过选项参数（以-开头的）
+            if (arg.startsWith('-')) {
+                // 检查是否是选项后的参数（如 -f file.txt）
+                if (i + 1 < args.length && !args[i + 1].startsWith('-')) {
+                    // 对于某些命令，选项后可能是路径
+                    if (['cp', 'mv', 'ln', 'chmod', 'chown', 'chgrp'].includes(command)) {
+                        paths.push(args[i + 1]);
+                        i++; // 跳过下一个参数
+                    }
+                }
+                continue;
+            }
+
+            // 对于特定命令，跳过非路径参数
+            if (['chmod', 'chown', 'chgrp'].includes(command) && i === 0) {
+                // 对于chmod等命令，第一个参数通常是权限/所有者，不是路径
+                continue;
+            }
+
+            // 对于echo命令，只有重定向到文件的情况才考虑
+            if (command === 'echo' && !arg.includes('>')) {
+                continue;
+            }
+
+            // 添加可能的路径
+            paths.push(arg);
+        }
+
+        return paths;
+    }
+
+    private async refreshFileExplorer(pathsToRefresh?: string[]): Promise<void> {
+        const treeDataProvider = this.fileExplorerManager.getTreeDataProvider();
+        if (!treeDataProvider) return;
+
+        // 如果没有指定路径，默认刷新当前工作目录
+        const paths = pathsToRefresh && pathsToRefresh.length > 0 ? pathsToRefresh : [this.currentWorkingDirectory];
+        const processedPaths = new Set<string>();
+
+        for (const pathToRefresh of paths) {
+            try {
+                // 解析路径（支持~和相对路径）
+                let actualPath = pathToRefresh;
+
+                // 使用现有的getHomeDirectory方法获取家目录
+                const homeDir = await this.getHomeDirectory();
+
+                // 解析~为家目录
+                if (actualPath.startsWith('~')) {
+                    actualPath = actualPath.replace('~', homeDir);
+                }
+
+                // 确保路径是绝对路径
+                if (!actualPath.startsWith('/')) {
+                    // 如果是相对路径，基于当前工作目录解析
+                    let baseDir = this.currentWorkingDirectory;
+                    if (baseDir.startsWith('~')) {
+                        baseDir = baseDir.replace('~', homeDir);
+                    }
+                    if (!baseDir.startsWith('/')) {
+                        baseDir = homeDir;
+                    }
+                    actualPath = path.posix.join(baseDir, actualPath);
+                }
+
+                // 获取目录路径
+                let dirPath = actualPath;
+
+                // 获取父目录
+                const parentPath = path.dirname(dirPath) === '.' ? '/' : path.dirname(dirPath);
+
+                // 避免重复处理
+                if (processedPaths.has(parentPath)) continue;
+                processedPaths.add(parentPath);
+
+                // 获取服务器节点
+                const serverNode = treeDataProvider.getServer(this.connectionString);
+                if (!serverNode) {
+                    // 如果找不到服务器节点，降级为刷新整个树
+                    treeDataProvider.refreshItem(undefined);
+                    continue;
+                }
+
+                // 使用新的路径查找功能来查找并刷新父目录节点
+                const parentNode = treeDataProvider.findNodeByPath(this.connectionString, parentPath);
+                if (parentNode) {
+                    // 如果找到父目录节点，刷新它
+                    treeDataProvider.refreshItem(parentNode);
+                } else if (parentPath === '/') {
+                    // 如果是根目录且未找到节点，刷新服务器节点
+                    treeDataProvider.refreshItem(serverNode);
+                } else {
+                    // 如果找不到父目录节点，尝试刷新服务器节点作为备选
+                    console.log(`找不到路径 ${parentPath} 的节点，刷新服务器节点`);
+                    treeDataProvider.refreshItem(serverNode);
+                }
+
+                // 如果当前路径不同于父路径，也刷新当前路径
+                if (dirPath !== parentPath) {
+                    const currentNode = treeDataProvider.findNodeByPath(this.connectionString, dirPath);
+                    if (currentNode) {
+                        treeDataProvider.refreshItem(currentNode);
+                    }
+                }
+            } catch (error) {
+                console.error('Error refreshing file explorer:', error);
+                // 出错时降级为刷新整个树
+                try {
+                    treeDataProvider.refreshItem(undefined);
+                } catch (refreshError) {
+                    console.error('Failed to refresh entire tree:', refreshError);
+                }
+            }
+        }
+    }
+
     private detectEditorExitCommand(): boolean {
         const buffer = this.editorBuffer;
 
@@ -286,7 +447,12 @@ export class TerminalProvider implements vscode.Pseudoterminal {
             /:qa(\r\n|\r|\n)$/,    // :qa 后跟任何换行符
             /:qa!(\r\n|\r|\n)$/,   // :qa! 后跟任何换行符
             /ZZ$/,                 // ZZ 结尾
-            /ZQ$/                  // ZQ 结尾
+            /ZQ$/,                 // ZQ 结尾
+            // 添加对micro编辑器退出的支持
+            /\^Q/,                // Ctrl+Q (micro退出)
+            /\^X/,                // Ctrl+X (micro退出)
+            /^q$/,                 // micro也支持:q命令
+            /\^C/                 // Ctrl+C 通常也可退出micro
         ];
 
         for (const pattern of exitPatterns) {
@@ -394,6 +560,12 @@ export class TerminalProvider implements vscode.Pseudoterminal {
             // 检测 vim/vi 退出命令
             if (this.detectEditorExitCommand()) {
                 this.resetTerminalState();
+
+                // 当从编辑器退出时，刷新文件资源管理器
+                // 延迟刷新以确保文件操作已完成
+                setTimeout(() => {
+                    this.refreshFileExplorer();
+                }, 500);
             }
 
             // 实时转发所有输入到 SSH
@@ -1065,6 +1237,10 @@ export class TerminalProvider implements vscode.Pseudoterminal {
                                 if (!isCompleted) {
                                     isCompleted = true;
                                     this.writeEmitter.fire(`\r\nFile uploaded: ${remotePath}\r\n`);
+                                    // 刷新文件资源管理器，显示新上传的文件
+                                    setTimeout(() => {
+                                        this.refreshFileExplorer([remotePath]);
+                                    }, 500);
                                     let prompt = this.getPrompt();
                                     this.writeEmitter.fire(prompt);
                                     resolve(true);
@@ -1074,6 +1250,10 @@ export class TerminalProvider implements vscode.Pseudoterminal {
                                 if (!isCompleted) {
                                     isCompleted = true;
                                     this.writeEmitter.fire(`\r\nFile uploaded: ${remotePath}\r\n`);
+                                    // 刷新文件资源管理器，显示新上传的文件
+                                    setTimeout(() => {
+                                        this.refreshFileExplorer([remotePath]);
+                                    }, 500);
                                     let prompt = this.getPrompt();
                                     this.writeEmitter.fire(prompt);
                                     resolve(true);
@@ -1083,6 +1263,10 @@ export class TerminalProvider implements vscode.Pseudoterminal {
                                 if (!isCompleted) {
                                     isCompleted = true;
                                     this.writeEmitter.fire(`\r\nFile uploaded: ${remotePath}\r\n`);
+                                    // 刷新文件资源管理器，显示新上传的文件
+                                    setTimeout(() => {
+                                        this.refreshFileExplorer([remotePath]);
+                                    }, 500);
                                     let prompt = this.getPrompt();
                                     this.writeEmitter.fire(prompt);
                                     resolve(true);
