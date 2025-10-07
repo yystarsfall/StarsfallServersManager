@@ -1,14 +1,14 @@
 import * as vscode from 'vscode';
-import { ServerTreeDataProvider } from './serversTreeDataProvider';
+import { StarsfallTreeDataProvider, TreeNode } from './starsfallTreeDataProvider';
 
 export class FileExplorerManager {
     private static instance: FileExplorerManager;
-    private treeDataProvider!: ServerTreeDataProvider;
-    private treeView!: vscode.TreeView<vscode.TreeItem>;
+    private treeDataProvider!: StarsfallTreeDataProvider;
+    private treeView!: vscode.TreeView<TreeNode>;
 
     private constructor() {
         if (!FileExplorerManager.instance) {
-            this.treeDataProvider = new ServerTreeDataProvider();
+            this.treeDataProvider = new StarsfallTreeDataProvider();
             this.treeView = vscode.window.createTreeView('serversList', {
                 treeDataProvider: this.treeDataProvider
             });
@@ -60,7 +60,7 @@ export class FileExplorerManager {
         this.treeView.title = this.treeView.title;
     }
 
-    public getTreeDataProvider(): ServerTreeDataProvider {
+    public getTreeDataProvider(): StarsfallTreeDataProvider {
         return this.treeDataProvider;
     }
 }

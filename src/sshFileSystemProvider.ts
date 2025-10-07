@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import { Client } from 'ssh2';
 import { readFileSync } from 'fs';
-import { ServerTreeDataProvider } from './serversTreeDataProvider';
+import { StarsfallTreeDataProvider } from './starsfallTreeDataProvider';
 
 export class SshFileSystemProvider implements vscode.FileSystemProvider {
     private _emitter = new vscode.EventEmitter<vscode.FileChangeEvent[]>();
@@ -12,9 +12,9 @@ export class SshFileSystemProvider implements vscode.FileSystemProvider {
     readonly onDidChangeFile = this._emitter.event;
 
     private _watchers = new Map<string, NodeJS.Timer>();
-    private treeDataProvider: ServerTreeDataProvider;
+    private treeDataProvider: StarsfallTreeDataProvider;
 
-    constructor(treeDataProvider: ServerTreeDataProvider) {
+    constructor(treeDataProvider: StarsfallTreeDataProvider) {
         this.treeDataProvider = treeDataProvider;
         this.logChannel = vscode.window.createOutputChannel('SSH FS');
     }

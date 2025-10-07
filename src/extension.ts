@@ -11,6 +11,12 @@ const serverManager = new ServerManager(fileExplorerManager);
 export function activate(context: vscode.ExtensionContext) {
   console.log('Starsfall Servers Manager is now active!');
 
+  // 监听终端关闭事件，清理缓存
+  const terminalCloseSubscription = vscode.window.onDidCloseTerminal(terminal => {
+    serverManager.handleTerminalClose(terminal);
+  });
+  context.subscriptions.push(terminalCloseSubscription);
+
   // 全局异常监听
   process.on('unhandledRejection', (err) => {
     console.error('[UNHANDLED REJECTION]', err);
@@ -64,6 +70,11 @@ export function activate(context: vscode.ExtensionContext) {
     treeDataProvider.openFile(fileItem);
   });
 
+  // 注册复制终端命令
+  const duplicateTerminalCommand = vscode.commands.registerCommand('starsfall.duplicateTerminal', async () => {
+    await serverManager.duplicateCurrentTerminal();
+  });
+
   context.subscriptions.push(
     connectServerCommand,
     editServerCommand,
@@ -73,7 +84,8 @@ export function activate(context: vscode.ExtensionContext) {
     focusServersExplorerCommand,
     uploadFileCommand,
     downloadFileCommand,
-    openFileCommand
+    openFileCommand,
+    duplicateTerminalCommand
   );
 }
 
